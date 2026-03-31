@@ -74,7 +74,7 @@ def create_app(config):
     return app
 
 
-async def run_server(config_path: str):
+def run_server(config_path: str):
     config = load_config(config_path)
     app = create_app(config)
     logger.info(f"Starting server on {config.server.host}:{config.server.port}")
@@ -97,7 +97,8 @@ async def interactive_install(config_path: str):
     from src.install.flow import run_install_flow
     result = await run_install_flow(config_path)
     # After install flow saves config, load and start server
-    await run_server(config_path)
+    # run_server() is blocking (runs forever as web server)
+    run_server(config_path)
 
 
 def main():
