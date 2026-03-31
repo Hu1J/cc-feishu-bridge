@@ -18,36 +18,37 @@ async def run_install_flow(config_path: str = "config.yaml") -> AppRegistrationR
     print("\n🚀 开始安装 cc-feishu-bridge...\n")
 
     api = FeishuInstallAPI()
-
-    # Step 1: Init
-    print("正在初始化...")
-    await api.init()
-    print("初始化完成")
-
-    # Step 2: Begin → get QR URL
-    print("正在获取二维码...")
-    begin_result = await api.begin()
-
-    # Build QR URL with from=onboard tag
-    qr_url = begin_result.verification_uri_complete
-    if "?" in qr_url:
-        qr_url += "&from=onboard"
-    else:
-        qr_url += "?from=onboard"
-
-    # Step 3: Print QR
-    print("\n" + "=" * 50)
-    print("请使用飞书扫码完成配置（请确保已在飞书开放平台创建应用）")
-    print("=" * 50 + "\n")
-    print_qr(qr_url)
-    print("等待扫码完成...\n")
-
-    # Step 4: Poll for result
     try:
+        # Step 1: Init
+        print("正在初始化...")
+        await api.init()
+        print("初始化完成")
+
+        # Step 2: Begin → get QR URL
+        print("正在获取二维码...")
+        begin_result = await api.begin()
+
+        # Build QR URL with from=onboard tag
+        qr_url = begin_result.verification_uri_complete
+        if "?" in qr_url:
+            qr_url += "&from=onboard"
+        else:
+            qr_url += "?from=onboard"
+
+        # Step 3: Print QR
+        print("\n" + "=" * 50)
+        print("请使用飞书扫码完成配置（请确保已在飞书开放平台创建应用）")
+        print("=" * 50 + "\n")
+        print_qr(qr_url)
+        print("等待扫码完成...\n")
+
+        # Step 4: Poll for result
         result = await api.poll(begin_result.device_code, timeout=begin_result.expires_in)
     except RuntimeError as e:
         print(f"\n❌ 安装失败: {e}")
         raise
+    finally:
+        await api.close()
 
     # Step 5: Save config
     print(f"\n✅ 机器人创建成功！")

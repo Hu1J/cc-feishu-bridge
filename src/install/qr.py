@@ -25,8 +25,15 @@ def print_qr(url: str) -> None:
     img = qr.make_image(fill_color="black", back_color="white")
 
     # Print as ASCII
-    for row in img.getdata():
-        for pixel in row:
-            print("  " if pixel else "██", end="")
-        print()
+    size = img.size  # (width, height)
+    pixels = img.getdata()
+    idx = 0
+    for _ in range(size[1]):  # rows
+        row_str = ""
+        for _ in range(size[0]):  # cols
+            pixel = pixels[idx]
+            # pixel is 0 for white, 1 for black (or intensity value)
+            row_str += "  " if pixel else "██"
+            idx += 1
+        print(row_str)
     print(f"\n或者直接打开: {url}\n")

@@ -28,42 +28,79 @@ class BeginResult:
 
 
 class FeishuInstallAPI:
-    BASE_URL_FEISHU = "https://open.feishu.cn"
-    BASE_URL_LARK = "https://open.larksuite.com"
+    """
+    Feishu App Registration API using OAuth Device Flow.
+
+    Endpoints (from @larksuite/openclaw-lark-tools feishu-auth.js):
+      - init   : POST /oauth/v1/app/registration  action=init
+      - begin  : POST /oauth/v1/app/registration  action=begin, archetype=PersonalAgent
+      - poll   : POST /oauth/v1/app/registration  action=poll, device_code=xxx
+
+    Base URLs:
+      - Feishu: https://accounts.feishu.cn
+      - Lark  : https://accounts.larksuite.com
+    """
+
+    BASE_URL_FEISHU = "https://accounts.feishu.cn"
+    BASE_URL_LARK = "https://accounts.larksuite.com"
 
     def __init__(self, env: str = "prod"):
         self.env = env
         self._base_url = self.BASE_URL_FEISHU
+        self._client: Optional[httpx.AsyncClient] = None
 
     def set_domain(self, is_lark: bool):
         self._base_url = self.BASE_URL_LARK if is_lark else self.BASE_URL_FEISHU
 
-    async def init(self) -> dict:
-        """Initialize app registration. Returns supported_auth_methods."""
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{self._base_url}/oauth/v1/app_registration",
-                data={"action": "init"},
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
+    def _url(self, path: str) -> str:
+        return f"{self._base_url}{path}"
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Return a shared client with cookie persistence (for nonce tracking)."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                timeout=30.0,
+                cookies=httpx.Cookies(),
+                follow_redirects=True,
             )
-            resp.raise_for_status()
-            return resp.json()
+        return self._client
+
+    async def close(self):
+        """Close the shared HTTP client."""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+    async def init(self) -> dict:
+        """Initialize app registration. Returns { nonce, supported_auth_methods }."""
+        client = await self._get_client()
+        resp = await client.post(
+            self._url("/oauth/v1/app/registration"),
+            data={"action": "init"},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     async def begin(self) -> BeginResult:
-        """Start app registration flow. Returns QR URI + device_code."""
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{self._base_url}/oauth/v1/app_registration",
-                data={
-                    "action": "begin",
-                    "archetype": "PersonalAgent",
-                    "auth_method": "client_secret",
-                    "request_user_info": "open_id",
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        """
+        Start app registration flow.
+        The server associates this call with the nonce from init() via session cookie.
+        Returns QR URI + device_code.
+        """
+        client = await self._get_client()
+        resp = await client.post(
+            self._url("/oauth/v1/app/registration"),
+            data={
+                "action": "begin",
+                "archetype": "PersonalAgent",
+                "auth_method": "client_secret",
+                "request_user_info": "open_id",
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
 
         return BeginResult(
             device_code=data["device_code"],
@@ -79,42 +116,41 @@ class FeishuInstallAPI:
         Poll until user completes QR scan and registration.
         Returns client_id, client_secret, open_id when ready.
         """
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            start = time.monotonic()
-            interval = 5
+        client = await self._get_client()
+        start = time.monotonic()
+        interval = 5
 
-            while time.monotonic() - start < timeout:
-                resp = await client.post(
-                    f"{self._base_url}/oauth/v1/app_registration",
-                    data={
-                        "action": "poll",
-                        "device_code": device_code,
-                    },
-                    headers={"Content-Type": "application/x-www-form-urlencoded"},
-                )
-                data = resp.json()
+        while time.monotonic() - start < timeout:
+            resp = await client.post(
+                self._url("/oauth/v1/app/registration"),
+                data={
+                    "action": "poll",
+                    "device_code": device_code,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            data = resp.json()
 
-                if data.get("error"):
-                    err = data["error"]
-                    if err == "authorization_pending":
-                        await asyncio.sleep(interval)
-                        continue
-                    elif err == "access_denied":
-                        raise RuntimeError("用户拒绝了授权 (access_denied)")
-                    elif err in ("expired_token", "authorization_timeout"):
-                        raise RuntimeError("授权已过期，请重新扫码 (expired)")
-                    else:
-                        raise RuntimeError(f"授权失败: {err}")
-
-                if data.get("client_id") and data.get("client_secret"):
-                    is_lark = data.get("user_info", {}).get("tenant_brand") == "lark"
-                    return AppRegistrationResult(
-                        app_id=data["client_id"],
-                        app_secret=data["client_secret"],
-                        user_open_id=data.get("user_info", {}).get("open_id", ""),
-                        domain="lark" if is_lark else "feishu",
-                    )
-
+            # authorization_pending means user hasn't completed yet — keep polling
+            if data.get("error") == "authorization_pending":
                 await asyncio.sleep(interval)
+                continue
+            elif data.get("error") == "access_denied":
+                raise RuntimeError("用户拒绝了授权 (access_denied)")
+            elif data.get("error") in ("expired_token", "authorization_timeout"):
+                raise RuntimeError("授权已过期，请重新扫码 (expired)")
+            elif data.get("error"):
+                raise RuntimeError(f"授权失败: {data['error']}")
 
-            raise RuntimeError("扫码超时，请重新运行安装命令")
+            if data.get("client_id") and data.get("client_secret"):
+                is_lark = data.get("user_info", {}).get("tenant_brand") == "lark"
+                return AppRegistrationResult(
+                    app_id=data["client_id"],
+                    app_secret=data["client_secret"],
+                    user_open_id=data.get("user_info", {}).get("open_id", ""),
+                    domain="lark" if is_lark else "feishu",
+                )
+
+            await asyncio.sleep(interval)
+
+        raise RuntimeError("扫码超时，请重新运行安装命令")

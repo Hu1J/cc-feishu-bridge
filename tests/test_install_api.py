@@ -13,17 +13,17 @@ def api():
 
 
 def test_default_domain_is_feishu(api):
-    assert api._base_url == "https://open.feishu.cn"
+    assert api._base_url == "https://accounts.feishu.cn"
 
 
 def test_set_domain_lark(api):
     api.set_domain(is_lark=True)
-    assert api._base_url == "https://open.larksuite.com"
+    assert api._base_url == "https://accounts.larksuite.com"
 
 
 def test_set_domain_feishu(api):
     api.set_domain(is_lark=False)
-    assert api._base_url == "https://open.feishu.cn"
+    assert api._base_url == "https://accounts.feishu.cn"
 
 
 def test_begin_result_dataclass():
