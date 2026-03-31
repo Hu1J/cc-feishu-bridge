@@ -60,3 +60,40 @@ def load_config(path: str) -> Config:
         storage=StorageConfig(**raw.get("storage", {})),
         server=ServerConfig(**raw.get("server", {})),
     )
+
+
+def save_config(path: str, feishu_app_id: str, feishu_app_secret: str,
+                domain: str, bot_name: str,
+                allowed_users: list[str],
+                claude_cli_path: str, claude_max_turns: int,
+                claude_approved_directory: str,
+                storage_db_path: str,
+                server_host: str, server_port: int, server_webhook_path: str) -> None:
+    """Save a complete config to a YAML file."""
+    config = {
+        "feishu": {
+            "app_id": feishu_app_id,
+            "app_secret": feishu_app_secret,
+            "bot_name": bot_name,
+            "domain": domain,
+        },
+        "auth": {
+            "allowed_users": allowed_users,
+        },
+        "claude": {
+            "cli_path": claude_cli_path,
+            "max_turns": claude_max_turns,
+            "approved_directory": claude_approved_directory,
+        },
+        "storage": {
+            "db_path": storage_db_path,
+        },
+        "server": {
+            "host": server_host,
+            "port": server_port,
+            "webhook_path": server_webhook_path,
+        },
+    }
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, allow_unicode=True)

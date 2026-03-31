@@ -1,4 +1,4 @@
-"""CLI entry point and HTTP webhook server."""
+"""CLI entry point — detects config and routes to install or start."""
 from __future__ import annotations
 
 import argparse
@@ -20,11 +20,11 @@ from src.format.reply_formatter import ReplyFormatter
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_CONFIG_PATH = "config.yaml"
+
 
 async def webhook_handler(request: web.Request) -> web.Response:
-    """Handle incoming Feishu webhook events."""
     handler: MessageHandler = request.app["handler"]
-
     try:
         body = await request.json()
     except Exception:
@@ -34,9 +34,7 @@ async def webhook_handler(request: web.Request) -> web.Response:
     if not message:
         return web.Response(status=200, text="OK")
 
-    # Run handler in background
     asyncio.create_task(handler.handle(message))
-
     return web.Response(status=200, text="OK")
 
 
@@ -44,8 +42,7 @@ async def health_handler(request: web.Request) -> web.Response:
     return web.Response(text="OK")
 
 
-def create_app(config) -> web.Application:
-    """Build the aiohttp application."""
+def create_app(config):
     feishu = FeishuClient(
         app_id=config.feishu.app_id,
         app_secret=config.feishu.app_secret,
@@ -78,9 +75,40 @@ def create_app(config) -> web.Application:
     return app
 
 
+async def run_server(config_path: str):
+    config = load_config(config_path)
+    app = create_app(config)
+    logger.info(f"Starting server on {config.server.host}:{config.server.port}")
+    web.run_app(
+        app,
+        host=config.server.host,
+        port=config.server.port,
+        print=None,
+    )
+
+
+def detect_config(config_path: str) -> bool:
+    """Check if config file exists and is non-empty."""
+    p = Path(config_path)
+    return p.exists() and p.stat().st_size > 0
+
+
+async def interactive_install(config_path: str):
+    """Run the QR-code install flow, then start server."""
+    from src.install.flow import run_install_flow
+    result = await run_install_flow(config_path)
+    # After install flow saves config, load and start server
+    await run_server(config_path)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Claude Code Feishu Bridge")
-    parser.add_argument("--config", type=str, required=True)
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=DEFAULT_CONFIG_PATH,
+        help="Path to config.yaml",
+    )
     parser.add_argument(
         "--log-level",
         type=str,
@@ -94,16 +122,12 @@ def main():
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
-    config = load_config(args.config)
-    logger.info("Config loaded, starting bridge service...")
-
-    app = create_app(config)
-    web.run_app(
-        app,
-        host=config.server.host,
-        port=config.server.port,
-        print=None,
-    )
+    if detect_config(args.config):
+        logger.info(f"Config found at {args.config}, starting server...")
+        asyncio.run(run_server(args.config))
+    else:
+        logger.info(f"No config found at {args.config}, running install flow...")
+        asyncio.run(interactive_install(args.config))
 
 
 if __name__ == "__main__":
