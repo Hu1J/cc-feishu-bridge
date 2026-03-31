@@ -47,9 +47,10 @@ class Config:
     claude: ClaudeConfig
     storage: StorageConfig
     server: ServerConfig
+    data_dir: str = ""
 
 
-def load_config(path: str) -> Config:
+def load_config(path: str, data_dir: str = "") -> Config:
     """Load and validate configuration from YAML file."""
     with open(path) as f:
         raw = yaml.safe_load(f)
@@ -60,6 +61,7 @@ def load_config(path: str) -> Config:
         claude=ClaudeConfig(**raw.get("claude", {})),
         storage=StorageConfig(**raw.get("storage", {})),
         server=ServerConfig(**raw.get("server", {})),
+        data_dir=data_dir,
     )
 
 
@@ -98,3 +100,22 @@ def save_config(path: str, feishu_app_id: str, feishu_app_secret: str,
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+
+
+def resolve_config_path() -> tuple[str, str]:
+    """Resolve config and data directories relative to cwd.
+
+    Uses .cc-feishu/ subdirectory in the current working directory
+    for natural multi-instance isolation:
+      - Config: {cwd}/.cc-feishu/config.yaml
+      - Data:  {cwd}/.cc-feishu/ (sessions.db, logs)
+
+    Auto-creates .cc-feishu/ if not found (runs install flow on first start).
+    """
+    import os
+    cwd = os.getcwd()
+    cc_dir = Path(cwd).resolve() / ".cc-feishu"
+    cc_dir.mkdir(exist_ok=True)
+    cfg_path = cc_dir / "config.yaml"
+    cfg_path.touch(exist_ok=True)
+    return (str(cfg_path), str(cc_dir))
