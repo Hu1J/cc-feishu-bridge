@@ -1,19 +1,18 @@
-"""Terminal QR code printing using qrcode-terminal (same as openclaw)."""
+"""Terminal QR code printing using qrcode built-in ASCII output."""
 from __future__ import annotations
 
-try:
-    import qrcode_terminal as qr_terminal
-    QRCODE_AVAILABLE = True
-except ImportError:
-    QRCODE_AVAILABLE = False
+import qrcode
 
 
 def print_qr(url: str) -> None:
-    """Print QR code to terminal using qrcode-terminal (auto-sized for terminal)."""
-    if not QRCODE_AVAILABLE:
-        print(f"\n请用飞书扫码打开链接:\n{url}\n")
-        return
+    """Print QR code to terminal using qrcode's built-in ASCII renderer.
 
+    Uses Unicode full-block characters (█ and space) for a compact
+    rendering that fits well in standard 80-char terminals.
+    """
     print()
-    qr_terminal.qrcode_terminal.draw(url)
+    qr = qrcode.QRCode(box_size=4, border=2)
+    qr.add_data(url)
+    qr.make()
+    qr.print_ascii()
     print(f"\n或者直接打开: {url}\n")
