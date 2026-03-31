@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 import argparse
 from unittest.mock import patch, AsyncMock
@@ -11,3 +12,5 @@ def test_main_shows_no_config_message(capsys, tmp_path, monkeypatch):
         from src.main import main
         with pytest.raises(SystemExit):
             main(["--log-level", "DEBUG"])
+    # Reset event loop after asyncio.run() closes it, so subsequent tests are not affected
+    asyncio.set_event_loop(asyncio.new_event_loop())

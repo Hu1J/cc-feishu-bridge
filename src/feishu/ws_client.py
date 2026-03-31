@@ -73,6 +73,14 @@ class FeishuWSClient:
                     message_type=msg_type,
                     create_time=getattr(message, "create_time", ""),
                 )
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    # No running loop (e.g., in tests) — run in a new loop
+                    loop = asyncio.new_event_loop()
+                    loop.run_until_complete(self._on_message(incoming))
+                    loop.close()
+                    return
                 asyncio.ensure_future(self._on_message(incoming))
             except Exception as e:
                 logger.exception(f"Error handling Feishu message: {e}")
