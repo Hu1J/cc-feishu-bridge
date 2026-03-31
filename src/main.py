@@ -93,15 +93,10 @@ def detect_config(config_path: str) -> bool:
 
 
 async def interactive_install(config_path: str):
-    """Run the QR-code install flow, then start server."""
+    """Run the QR-code install flow. Caller will then start the server."""
     from src.install.flow import run_install_flow
-    result = await run_install_flow(config_path)
-    # Start server in a thread pool executor to avoid nested event loop conflict.
-    # web.run_app() calls asyncio.run() internally, which cannot run inside an
-    # existing loop, so we offload it to a worker thread.
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, run_server, config_path)
-    # run_in_executor never returns since run_server blocks forever
+    await run_install_flow(config_path)
+    # Return to caller; main() will then start the server in a fresh loop.
 
 
 def main():
@@ -141,6 +136,9 @@ def main():
     else:
         logger.info(f"No config found at {args.config}, running install flow...")
         asyncio.run(interactive_install(args.config))
+        # Install complete; start server in a fresh loop.
+        # run_server() is blocking (web.run_app runs forever).
+        asyncio.run(run_server(args.config))
 
 
 if __name__ == "__main__":
