@@ -1,0 +1,148 @@
+"""Message handler orchestrator — routes messages to Claude and back."""
+from __future__ import annotations
+
+import asyncio
+import logging
+from dataclasses import dataclass
+
+from src.feishu.client import FeishuClient, IncomingMessage
+from src.security.auth import Authenticator
+from src.security.validator import SecurityValidator
+from src.claude.integration import ClaudeIntegration
+from src.claude.session_manager import SessionManager
+from src.format.reply_formatter import ReplyFormatter
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class HandlerResult:
+    success: bool
+    response_text: str | None = None
+    error: str | None = None
+
+
+class MessageHandler:
+    def __init__(
+        self,
+        feishu_client: FeishuClient,
+        authenticator: Authenticator,
+        validator: SecurityValidator,
+        claude: ClaudeIntegration,
+        session_manager: SessionManager,
+        formatter: ReplyFormatter,
+        approved_directory: str,
+    ):
+        self.feishu = feishu_client
+        self.auth = authenticator
+        self.validator = validator
+        self.claude = claude
+        self.sessions = session_manager
+        self.formatter = formatter
+        self.approved_directory = approved_directory
+
+    async def handle(self, message: IncomingMessage) -> HandlerResult:
+        """Main entry point for processing an incoming message."""
+        # 1. Auth check
+        auth_result = self.auth.authenticate(message.user_open_id)
+        if not auth_result.authorized:
+            logger.info(f"Ignoring message from unauthorized user: {message.user_open_id}")
+            return HandlerResult(success=True, response_text=None)  # Silently ignore
+
+        # 2. Handle commands
+        if message.content.startswith("/"):
+            return await self._handle_command(message)
+
+        # 3. Input validation
+        ok, err = self.validator.validate(message.content)
+        if not ok:
+            return HandlerResult(
+                success=False,
+                response_text=f"⚠️ {err}",
+            )
+
+        # 4. Get or create session
+        session = self.sessions.get_active_session(message.user_open_id)
+        session_id = session.session_id if session else None
+
+        # 5. Call Claude
+        try:
+            async def stream_callback(claude_msg):
+                if claude_msg.tool_name:
+                    tool_text = self.formatter.format_tool_call(
+                        claude_msg.tool_name,
+                        claude_msg.tool_input,
+                    )
+                    await self._safe_send(message.chat_id, tool_text)
+
+            response, new_session_id, cost = await self.claude.query(
+                prompt=message.content,
+                session_id=session_id,
+                cwd=self.approved_directory,
+                on_stream=stream_callback,
+            )
+
+            # 6. Save session
+            if not session and new_session_id:
+                self.sessions.create_session(message.user_open_id, self.approved_directory)
+            elif session:
+                self.sessions.update_session(session.session_id, cost=cost, message_increment=1)
+
+            # 7. Format and send response
+            formatted = self.formatter.format_text(response)
+            chunks = self.formatter.split_messages(formatted)
+            for chunk in chunks:
+                await self._safe_send(message.chat_id, chunk)
+
+            return HandlerResult(success=True)
+
+        except Exception as e:
+            logger.exception(f"Error handling message: {e}")
+            return HandlerResult(success=False, error=str(e))
+
+    async def _handle_command(self, message: IncomingMessage) -> HandlerResult:
+        """Handle slash commands like /new, /status."""
+        parts = message.content.split(maxsplit=1)
+        cmd = parts[0].lower()
+        arg = parts[1] if len(parts) > 1 else ""
+
+        if cmd == "/new":
+            session = self.sessions.create_session(
+                message.user_open_id,
+                self.approved_directory,
+            )
+            return HandlerResult(
+                success=True,
+                response_text=f"✅ 新会话已创建\n会话ID: {session.session_id}\n工作目录: {session.project_path}",
+            )
+
+        elif cmd == "/status":
+            session = self.sessions.get_active_session(message.user_open_id)
+            if not session:
+                return HandlerResult(
+                    success=True,
+                    response_text="暂无活跃会话",
+                )
+            return HandlerResult(
+                success=True,
+                response_text=(
+                    f"📊 会话状态\n"
+                    f"会话ID: {session.session_id}\n"
+                    f"消息数: {session.message_count}\n"
+                    f"累计费用: ${session.total_cost:.4f}\n"
+                    f"工作目录: {session.project_path}"
+                ),
+            )
+
+        else:
+            return HandlerResult(
+                success=True,
+                response_text=f"未知命令: {cmd}",
+            )
+
+    async def _safe_send(self, chat_id: str, text: str):
+        """Send message, ignoring errors (e.g., rate limits)."""
+        try:
+            await self.feishu.send_text(chat_id, text)
+        except Exception as e:
+            logger.warning(f"Failed to send message: {e}")
