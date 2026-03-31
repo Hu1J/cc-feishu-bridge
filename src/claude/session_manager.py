@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Session:
     session_id: str
+    sdk_session_id: str | None
     user_id: str
     project_path: str
     created_at: datetime
@@ -33,6 +34,7 @@ class SessionManager:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
                     session_id TEXT PRIMARY KEY,
+                    sdk_session_id TEXT,
                     user_id TEXT NOT NULL,
                     project_path TEXT NOT NULL,
                     created_at TIMESTAMP NOT NULL,
@@ -41,16 +43,22 @@ class SessionManager:
                     message_count INTEGER DEFAULT 0
                 )
             """)
+            # Migrate: add sdk_session_id column if it doesn't exist (existing installs)
+            try:
+                conn.execute("ALTER TABLE sessions ADD COLUMN sdk_session_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # column already exists
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_user_last
                 ON sessions(user_id, last_used DESC)
             """)
 
-    def create_session(self, user_id: str, project_path: str) -> Session:
+    def create_session(self, user_id: str, project_path: str, sdk_session_id: str | None = None) -> Session:
         """Create a new session for a user."""
         now = datetime.utcnow()
         session = Session(
             session_id=f"session_{now.strftime('%Y%m%d%H%M%S')}",
+            sdk_session_id=sdk_session_id,
             user_id=user_id,
             project_path=project_path,
             created_at=now,
@@ -61,10 +69,11 @@ class SessionManager:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """INSERT INTO sessions
-                   (session_id, user_id, project_path, created_at, last_used, total_cost, message_count)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (session_id, sdk_session_id, user_id, project_path, created_at, last_used, total_cost, message_count)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session.session_id,
+                    session.sdk_session_id,
                     session.user_id,
                     session.project_path,
                     session.created_at.isoformat(),
@@ -89,6 +98,7 @@ class SessionManager:
         if row:
             return Session(
                 session_id=row["session_id"],
+                sdk_session_id=row["sdk_session_id"],
                 user_id=row["user_id"],
                 project_path=row["project_path"],
                 created_at=datetime.fromisoformat(row["created_at"]),
@@ -113,6 +123,14 @@ class SessionManager:
                        message_count = message_count + ?
                    WHERE session_id = ?""",
                 (datetime.utcnow().isoformat(), cost, message_increment, session_id),
+            )
+
+    def update_sdk_session_id(self, session_id: str, sdk_session_id: str) -> None:
+        """Store the SDK's session ID for future continue_session calls."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """UPDATE sessions SET sdk_session_id = ? WHERE session_id = ?""",
+                (sdk_session_id, session_id),
             )
 
     def delete_session(self, session_id: str):

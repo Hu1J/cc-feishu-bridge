@@ -63,7 +63,8 @@ class MessageHandler:
 
         # 4. Get or create session
         session = self.sessions.get_active_session(message.user_open_id)
-        session_id = session.session_id if session else None
+        # Use SDK's session ID if available, so Claude can maintain context
+        sdk_session_id = session.sdk_session_id if session else None
 
         # 5. Call Claude
         try:
@@ -77,16 +78,23 @@ class MessageHandler:
 
             response, new_session_id, cost = await self.claude.query(
                 prompt=message.content,
-                session_id=session_id,
+                session_id=sdk_session_id,
                 cwd=self.approved_directory,
                 on_stream=stream_callback,
             )
 
             # 6. Save session
-            if not session and new_session_id:
-                self.sessions.create_session(message.user_open_id, self.approved_directory)
-            elif session:
+            if not session:
+                session = self.sessions.create_session(
+                    message.user_open_id,
+                    self.approved_directory,
+                    sdk_session_id=new_session_id,
+                )
+            else:
                 self.sessions.update_session(session.session_id, cost=cost, message_increment=1)
+                # Update SDK session ID if Claude returned a new one
+                if new_session_id:
+                    self.sessions.update_sdk_session_id(session.session_id, new_session_id)
 
             # 7. Format and send response
             formatted = self.formatter.format_text(response)
