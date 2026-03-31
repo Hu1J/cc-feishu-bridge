@@ -37,11 +37,8 @@ def build_onefile() -> Path:
         "--onefile",
         "--enable-console",
         "--assume-yes-for-downloads",
-        f"--python-flag=no_site",
         f"--output-dir={DIST_DIR}",
-        f"--paths={Path.cwd()}",
-        "--include-data-dir=./src=src",
-        "--windows-icon-from-ico=none",
+        "--include-package=src",
         "run.py",
     ]
 
