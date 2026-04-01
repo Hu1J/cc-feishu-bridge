@@ -62,9 +62,11 @@ class ClaudeIntegration:
             result_cost = 0.0
 
             async with client:
-                async for event in await client.query(prompt=prompt, session_id=session_id):
+                await client.query(prompt=prompt, session_id=session_id)
+
+                async for message in client.receive_response():
                     if on_stream:
-                        msg = self._parse_event(event)
+                        msg = self._parse_message(message)
                         if msg:
                             await on_stream(msg)
 
@@ -85,31 +87,33 @@ class ClaudeIntegration:
             logger.error("claude-agent-sdk not installed")
             raise RuntimeError("claude-agent-sdk is required. Install with: pip install claude-agent-sdk")
 
-    def _parse_event(self, event) -> ClaudeMessage | None:
-        """Parse SDK event into ClaudeMessage."""
-        event_type = getattr(event, "type", None)
+    def _parse_message(self, message) -> ClaudeMessage | None:
+        """Parse SDK Message into ClaudeMessage."""
+        import json
 
-        if event_type == "stream_delta":
-            content = getattr(event, "content", "")
-            if content:
-                return ClaudeMessage(content=content, is_final=False)
+        msg_type = type(message).__name__
 
-        elif event_type == "assistant":
-            content = getattr(event, "content", "")
-            if content:
-                return ClaudeMessage(content=content, is_final=False)
+        if msg_type == "AssistantMessage":
+            for block in getattr(message, "content", []):
+                block_type = type(block).__name__
+                if block_type == "TextBlock":
+                    text = getattr(block, "text", "")
+                    if text:
+                        return ClaudeMessage(content=text, is_final=False)
+                elif block_type == "ToolUseBlock":
+                    tool_name = getattr(block, "name", "Unknown")
+                    tool_input = getattr(block, "input", "")
+                    if isinstance(tool_input, dict):
+                        tool_input = json.dumps(tool_input)[:200]
+                    return ClaudeMessage(
+                        content="",
+                        is_final=False,
+                        tool_name=tool_name,
+                        tool_input=tool_input,
+                    )
 
-        elif event_type == "tool_use":
-            tool_name = getattr(event, "name", "Unknown")
-            tool_input = getattr(event, "input", "")
-            if isinstance(tool_input, dict):
-                import json
-                tool_input = json.dumps(tool_input)[:200]
-            return ClaudeMessage(
-                content="",
-                is_final=False,
-                tool_name=tool_name,
-                tool_input=tool_input,
-            )
+        elif msg_type == "ResultMessage":
+            content = getattr(message, "result", "") or ""
+            return ClaudeMessage(content=content, is_final=True)
 
         return None

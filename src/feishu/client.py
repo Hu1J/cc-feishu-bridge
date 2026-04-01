@@ -34,10 +34,12 @@ class FeishuClient:
     def _get_client(self):
         if self._client is None:
             import lark_oapi as lark
-            self._client = lark.Client(
-                self.app_id,
-                self.app_secret,
-                log_level=lark.LogLevel.INFO,
+            self._client = (
+                lark.Client.builder()
+                .app_id(self.app_id)
+                .app_secret(self.app_secret)
+                .log_level(lark.LogLevel.INFO)
+                .build()
             )
         return self._client
 
