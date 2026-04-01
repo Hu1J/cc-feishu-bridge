@@ -3,7 +3,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
-from src.feishu.client import FeishuClient, IncomingMessage
+from cc_feishu_bridge.feishu.client import FeishuClient, IncomingMessage
 
 
 def test_parse_incoming_text_message():

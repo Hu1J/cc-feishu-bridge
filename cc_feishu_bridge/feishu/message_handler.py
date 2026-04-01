@@ -5,12 +5,12 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
-from src.feishu.client import FeishuClient, IncomingMessage
-from src.security.auth import Authenticator
-from src.security.validator import SecurityValidator
-from src.claude.integration import ClaudeIntegration
-from src.claude.session_manager import SessionManager
-from src.format.reply_formatter import ReplyFormatter
+from cc_feishu_bridge.feishu.client import FeishuClient, IncomingMessage
+from cc_feishu_bridge.security.auth import Authenticator
+from cc_feishu_bridge.security.validator import SecurityValidator
+from cc_feishu_bridge.claude.integration import ClaudeIntegration
+from cc_feishu_bridge.claude.session_manager import SessionManager
+from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 
 logger = logging.getLogger(__name__)
 

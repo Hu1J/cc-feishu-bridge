@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import lark_oapi as lark
 
-from src.feishu.client import IncomingMessage
+from cc_feishu_bridge.feishu.client import IncomingMessage
 
 logger = logging.getLogger(__name__)
 

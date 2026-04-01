@@ -8,7 +8,7 @@ def test_resolve_config_path_creates_cc_dir(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = str(Path(tmpdir).resolve())
         monkeypatch.chdir(tmpdir)
-        from src.config import resolve_config_path
+        from cc_feishu_bridge.config import resolve_config_path
         cfg, data_dir = resolve_config_path()
 
         assert cfg == f"{tmpdir}/.cc-feishu-bridge/config.yaml"
@@ -25,7 +25,7 @@ def test_resolve_config_path_resumes_existing(monkeypatch):
         cfg_file.write_text("feishu:\n  app_id: test\n")
 
         monkeypatch.chdir(tmpdir)
-        from src.config import resolve_config_path
+        from cc_feishu_bridge.config import resolve_config_path
         cfg, data_dir = resolve_config_path()
 
         assert cfg == str(cfg_file)

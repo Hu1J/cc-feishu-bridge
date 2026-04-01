@@ -7,8 +7,8 @@ from pathlib import Path
 
 import yaml
 
-from src.install.api import FeishuInstallAPI, AppRegistrationResult
-from src.install.qr import print_qr
+from cc_feishu_bridge.install.api import FeishuInstallAPI, AppRegistrationResult
+from cc_feishu_bridge.install.qr import print_qr
 
 logger = logging.getLogger(__name__)
 

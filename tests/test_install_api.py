@@ -4,7 +4,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from src.install.api import FeishuInstallAPI, AppRegistrationResult, BeginResult
+from cc_feishu_bridge.install.api import FeishuInstallAPI, AppRegistrationResult, BeginResult
 
 
 @pytest.fixture

@@ -3,7 +3,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
-from src.format.reply_formatter import ReplyFormatter, FEISHU_MAX_MESSAGE_LENGTH
+from cc_feishu_bridge.format.reply_formatter import ReplyFormatter, FEISHU_MAX_MESSAGE_LENGTH
 
 
 @pytest.fixture

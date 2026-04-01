@@ -4,7 +4,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 import tempfile
-from src.claude.session_manager import SessionManager
+from cc_feishu_bridge.claude.session_manager import SessionManager
 
 
 @pytest.fixture
