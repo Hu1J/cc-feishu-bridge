@@ -14,6 +14,8 @@ class ClaudeMessage:
     is_final: bool = False
     tool_name: str | None = None
     tool_input: str | None = None
+    image_data: str | None = None   # 新增: base64 图片数据
+    mime_type: str | None = None   # 新增: 图片 MIME 类型
 
 
 StreamCallback = Callable[[ClaudeMessage], Awaitable[None]]
@@ -112,6 +114,17 @@ class ClaudeIntegration:
                         is_final=False,
                         tool_name=tool_name,
                         tool_input=tool_input,
+                    )
+                elif block_type == "ImageBlock":
+                    image_data = getattr(block, "data", "")       # base64 字符串
+                    mime_type  = getattr(block, "mimeType", "")  # "image/png" / "image/gif" 等
+                    return ClaudeMessage(
+                        content="",
+                        is_final=False,
+                        tool_name=None,
+                        tool_input=None,
+                        image_data=image_data or None,
+                        mime_type=mime_type or None,
                     )
 
         elif msg_type == "ResultMessage":
