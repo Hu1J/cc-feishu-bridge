@@ -27,7 +27,7 @@ jobs:
             arch: arm64
             ext: ""
           - platform: macos-x86_64
-            runner: macos-13
+            runner: macos-latest
             arch: x86_64
             ext: ""
           - platform: windows-x86_64
