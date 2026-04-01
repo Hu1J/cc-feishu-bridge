@@ -33,6 +33,7 @@ def create_handler(config, data_dir: str) -> MessageHandler:
         app_id=config.feishu.app_id,
         app_secret=config.feishu.app_secret,
         bot_name=config.feishu.bot_name,
+        data_dir=data_dir,
     )
     authenticator = Authenticator(allowed_users=config.auth.allowed_users)
     validator = SecurityValidator(approved_directory=config.claude.approved_directory)
@@ -53,6 +54,7 @@ def create_handler(config, data_dir: str) -> MessageHandler:
         session_manager=session_manager,
         formatter=formatter,
         approved_directory=config.claude.approved_directory,
+        data_dir=data_dir,
     )
     return handler
 
@@ -142,6 +144,12 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     signal.signal(signal.SIGTERM, cleanup)
 
     logger.info(f"Starting Feishu bridge (WS mode) — data: {data_dir}")
+
+    # Create media subdirectories
+    for sub in ("received_images", "received_files"):
+        sub_dir = os.path.join(data_dir, sub)
+        os.makedirs(sub_dir, exist_ok=True)
+
     ws_client.start()
 
 
