@@ -115,17 +115,35 @@ class ClaudeIntegration:
                         tool_name=tool_name,
                         tool_input=tool_input,
                     )
-                elif block_type == "ImageBlock":
-                    image_data = getattr(block, "data", "")       # base64 字符串
-                    mime_type  = getattr(block, "mimeType", "")  # "image/png" / "image/gif" 等
-                    return ClaudeMessage(
-                        content="",
-                        is_final=False,
-                        tool_name=None,
-                        tool_input=None,
-                        image_data=image_data or None,
-                        mime_type=mime_type or None,
-                    )
+                elif block_type == "ToolResultBlock":
+                    # Claude 通过工具（如 GenerateImage）返回的图片
+                    # content 是 list[dict] 或 str，dict 中 type=image 时含 base64 数据
+                    result_content = getattr(block, "content", None)
+                    if isinstance(result_content, list):
+                        for item in result_content:
+                            if isinstance(item, dict) and item.get("type") == "image":
+                                image_data = item.get("data", "")
+                                mime_type = item.get("mimeType", "image/png")
+                                return ClaudeMessage(
+                                    content="",
+                                    is_final=False,
+                                    tool_name=None,
+                                    tool_input=None,
+                                    image_data=image_data or None,
+                                    mime_type=mime_type or None,
+                                )
+                    elif isinstance(result_content, str) and result_content.startswith("data:image"):
+                        # 有时图片以 data URI 字符串形式返回
+                        header, data = result_content.split(",", 1)
+                        mime_type = header.split(";")[0].replace("data:", "")
+                        return ClaudeMessage(
+                            content="",
+                            is_final=False,
+                            tool_name=None,
+                            tool_input=None,
+                            image_data=data or None,
+                            mime_type=mime_type or "image/png",
+                        )
 
         elif msg_type == "ResultMessage":
             # Result is extracted separately; don't send through stream callback
