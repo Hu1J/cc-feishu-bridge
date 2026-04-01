@@ -52,9 +52,6 @@ async def run_install_flow(config_path: str = "config.yaml") -> AppRegistrationR
 
     # Step 5: Save config
     print(f"\n✅ 机器人创建成功！")
-    print(f"   App ID: {result.app_id}")
-    print(f"   用户 Open ID: {result.user_open_id}")
-    print(f"   域名: {result.domain}")
 
     save_config(result, config_path)
     return result

@@ -15,4 +15,4 @@ def print_qr(url: str) -> None:
     qr.add_data(url)
     qr.make()
     qr.print_ascii()
-    print(f"\n或者直接打开: {url}\n")
+    print()
