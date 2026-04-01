@@ -45,6 +45,7 @@ class FeishuClient:
 
     async def send_text(self, chat_id: str, text: str) -> str:
         """Send a text message to a chat. Returns message_id."""
+        import json
         import lark_oapi as lark
         client = self._get_client()
         request = (
@@ -53,7 +54,7 @@ class FeishuClient:
             .request_body(
                 lark.im.v1.CreateMessageRequestBody.builder()
                 .receive_id(chat_id)
-                .content(lark.NewHexText({"text": text}).to_json())
+                .content(json.dumps({"text": text}))
                 .msg_type("text")
                 .build()
             )
@@ -67,29 +68,57 @@ class FeishuClient:
             raise RuntimeError(f"Failed to send message: {response.msg}")
         return response.data.message_id
 
-    async def send_typing(self, chat_id: str) -> str:
-        """Send a typing indicator to a chat. Returns message_id."""
+    async def add_typing_reaction(self, message_id: str) -> str | None:
+        """Add a typing emoji reaction to a message (Feishu typing indicator).
+
+        Feishu has no dedicated typing REST API. The official plugin uses a
+        'Typing' emoji reaction on the user's message instead.
+        Silently returns None on failure — this is best-effort.
+        """
         import lark_oapi as lark
         client = self._get_client()
         request = (
-            lark.im.v1.CreateMessageRequest.builder()
-            .receive_id_type("chat_id")
+            lark.im.v1.CreateMessageReactionRequest.builder()
+            .message_id(message_id)
             .request_body(
-                lark.im.v1.CreateMessageRequestBody.builder()
-                .receive_id(chat_id)
-                .content(lark.NewHexText({"text": "", "type": "typing"}).to_json())
-                .msg_type("text")
+                lark.im.v1.CreateMessageReactionRequestBody.builder()
+                .reaction_type(
+                    lark.im.v1.ReactionType.builder()
+                    .emoji_type("Typing")
+                    .build()
+                )
                 .build()
             )
             .build()
         )
-        response = await asyncio.to_thread(
-            client.im.v1.message.create,
-            request,
+        try:
+            response = await asyncio.to_thread(
+                client.im.v1.message_reaction.create,
+                request,
+            )
+            if response.success():
+                return response.data.reaction_id
+        except Exception:
+            pass
+        return None
+
+    async def remove_typing_reaction(self, message_id: str, reaction_id: str) -> None:
+        """Remove a typing emoji reaction from a message. Silently ignores failures."""
+        import lark_oapi as lark
+        client = self._get_client()
+        request = (
+            lark.im.v1.DeleteMessageReactionRequest.builder()
+            .message_id(message_id)
+            .reaction_id(reaction_id)
+            .build()
         )
-        if not response.success():
-            raise RuntimeError(f"Failed to send typing: {response.msg}")
-        return response.data.message_id
+        try:
+            await asyncio.to_thread(
+                client.im.v1.message_reaction.delete,
+                request,
+            )
+        except Exception:
+            pass
 
     def parse_incoming_message(self, body: dict) -> IncomingMessage | None:
         """Parse webhook payload into IncomingMessage."""

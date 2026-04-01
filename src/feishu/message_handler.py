@@ -66,8 +66,9 @@ class MessageHandler:
         # Use SDK's session ID if available, so Claude can maintain context
         sdk_session_id = session.sdk_session_id if session else None
 
-        # 5. Send typing indicator
-        typing_task = asyncio.create_task(self.feishu.send_typing(message.chat_id))
+        # 5. Add typing reaction to user's message (Feishu has no dedicated typing API;
+        # the official plugin uses a 'Typing' emoji reaction instead)
+        reaction_id = await self.feishu.add_typing_reaction(message.message_id)
 
         # 6. Call Claude
         try:
@@ -110,6 +111,11 @@ class MessageHandler:
         except Exception as e:
             logger.exception(f"Error handling message: {e}")
             return HandlerResult(success=False, error=str(e))
+
+        finally:
+            # Always remove the typing reaction when done (success or error)
+            if reaction_id:
+                await self.feishu.remove_typing_reaction(message.message_id, reaction_id)
 
     async def _handle_command(self, message: IncomingMessage) -> HandlerResult:
         """Handle slash commands like /new, /status."""
