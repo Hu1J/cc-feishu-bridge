@@ -19,22 +19,35 @@ async def test_query_handles_missing_sdk(integration):
             await integration.query("hello")
 
 
-def test_parse_event_stream_delta(integration):
-    event = MagicMock()
-    event.type = "stream_delta"
-    event.content = "Hello "
-    msg = integration._parse_event(event)
+def test_parse_message_text_block(integration):
+    """_parse_message handles TextBlock from AssistantMessage."""
+    class TextBlock:
+        __name__ = "TextBlock"
+        def __init__(self): self.text = "Hello "
+
+    class AssistantMessage:
+        __name__ = "AssistantMessage"
+        def __init__(self, blocks): self.content = blocks
+
+    msg_obj = AssistantMessage([TextBlock()])
+    msg = integration._parse_message(msg_obj)
     assert msg is not None
     assert msg.content == "Hello "
     assert msg.is_final is False
 
 
-def test_parse_event_tool_use(integration):
-    event = MagicMock()
-    event.type = "tool_use"
-    event.name = "Read"
-    event.input = {"file_path": "main.py"}
-    msg = integration._parse_event(event)
+def test_parse_message_tool_use_block(integration):
+    """_parse_message handles ToolUseBlock from AssistantMessage."""
+    class ToolUseBlock:
+        __name__ = "ToolUseBlock"
+        def __init__(self): self.name = "Read"; self.input = {"file_path": "main.py"}
+
+    class AssistantMessage:
+        __name__ = "AssistantMessage"
+        def __init__(self, blocks): self.content = blocks
+
+    msg_obj = AssistantMessage([ToolUseBlock()])
+    msg = integration._parse_message(msg_obj)
     assert msg is not None
     assert msg.tool_name == "Read"
     assert "main.py" in msg.tool_input
