@@ -48,7 +48,7 @@ cc-feishu-bridge.exe
 ### 方式二：pip 安装
 
 ```bash
-pip install cc-feishu-bridge
+pip install -U cc-feishu-bridge
 cc-feishu-bridge
 ```
 
@@ -129,3 +129,7 @@ cd /path/to/project-B && cc-feishu-bridge  # 机器人 B 在 /path/to/project-B 
 ## 获取帮助
 
 如有问题请提交 [Issue](https://github.com/Hu1J/cc-feishu-bridge/issues)。
+
+## 更新日志
+
+详见 [CHANGELOG.md](./CHANGELOG.md)。
