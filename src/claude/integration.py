@@ -58,7 +58,7 @@ class ClaudeIntegration:
                 options.continue_session = True
 
             async with client:
-                async for event in client.query(prompt=prompt, session_id=session_id):
+                async for event in await client.query(prompt=prompt, session_id=session_id):
                     if on_stream:
                         msg = self._parse_event(event)
                         if msg:
