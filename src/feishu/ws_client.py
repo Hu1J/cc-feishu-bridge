@@ -47,8 +47,9 @@ class FeishuWSClient:
             if self._on_message is None:
                 return
             try:
-                message = event.message
-                sender = event.sender
+                event_data = event.event
+                message = event_data.message
+                sender = event_data.sender
                 msg_type = getattr(message, "msg_type", "text")
                 content_str = getattr(message, "content", "{}")
 

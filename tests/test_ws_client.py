@@ -23,15 +23,15 @@ def test_on_message_callback():
 
     # Mock event object simulating lark event
     mock_event = MagicMock()
-    mock_event.message.message_id = "msg_123"
-    mock_event.message.chat_id = "chat_abc"
-    mock_event.message.msg_type = "text"
-    mock_event.message.content = '{"text":"hello"}'
-    mock_event.message.create_time = "1234567890"
+    mock_event.event.message.message_id = "msg_123"
+    mock_event.event.message.chat_id = "chat_abc"
+    mock_event.event.message.msg_type = "text"
+    mock_event.event.message.content = '{"text":"hello"}'
+    mock_event.event.message.create_time = "1234567890"
 
     mock_sender = MagicMock()
     mock_sender.sender_id.open_id = "user_xyz"
-    mock_event.sender = mock_sender
+    mock_event.event.sender = mock_sender
 
     # Run handler + yield in a proper event loop to avoid "no current event loop" error
     async def run_test():
