@@ -75,6 +75,45 @@ def remove_pid(pid_file: str) -> None:
     Path(pid_file).unlink(missing_ok=True)
 
 
+RISK_WARNING = """
+⚠️  安全风险警告 / Security Risk Warning
+==============================================================
+
+cc-feishu-bridge 以 bypassPermissions 模式运行。
+Claude Code 可以执行任意终端命令、读写本地文件，无需每次授权确认。
+
+这意味着如果有人通过飞书向机器人发送恶意指令，攻击者可以：
+  • 在你的电脑上执行任意命令
+  • 读取、修改或删除你的本地文件
+  • 访问你的敏感信息
+
+请仅在可信任的网络环境下使用本工具。
+
+cc-feishu-bridge runs in bypassPermissions mode.
+Claude Code can execute arbitrary terminal commands and read/write local files
+without asking for permission each time.
+
+Do you understand and accept these risks? (yes/no): """
+
+
+def confirm_risk_warning() -> bool:
+    """Show risk warning and get user confirmation. Returns True only on 'yes'."""
+    print(RISK_WARNING)
+    while True:
+        try:
+            response = input().strip().lower()
+            if response in ("yes", "y"):
+                return True
+            elif response in ("no", "n", ""):
+                print("Cancelled — not starting the bridge.")
+                return False
+            else:
+                print("Please enter 'yes' or 'no': ", end="")
+        except EOFError:
+            print("no (EOF)")
+            return False
+
+
 def start_bridge(config_path: str, data_dir: str) -> None:
     """Start the bridge: load config and run WebSocket connection."""
     config = load_config(config_path)
@@ -205,28 +244,28 @@ def main(args=None):
         return
 
     # Default: start
-    if detect_config():
-        _, data_dir = resolve_config_path()
-        log_file = os.path.join(data_dir, "cc-feishu-bridge.log")
-        Path(data_dir).mkdir(exist_ok=True)
-        # Add file handler
-        fh = logging.FileHandler(log_file)
-        fh.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
-        logging.getLogger().addHandler(fh)
-        logger.info(f"Config found, starting bridge...")
-        start_bridge(*resolve_config_path())
-    else:
+    is_installed = detect_config()
+    if not is_installed:
         logger.info("No config found, running install flow...")
         cfg_path, data_dir = asyncio.run(interactive_install())
-        # Install complete; start bridge in a fresh process.
-        # Write log file first, then start blocking WS bridge.
-        log_file = os.path.join(data_dir, "cc-feishu-bridge.log")
-        Path(data_dir).mkdir(exist_ok=True)
-        fh = logging.FileHandler(log_file)
-        fh.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
-        logging.getLogger().addHandler(fh)
+    else:
+        cfg_path, data_dir = resolve_config_path()
+
+    # Risk warning must be acknowledged before starting
+    if not confirm_risk_warning():
+        return
+
+    # Set up logging to file
+    log_file = os.path.join(data_dir, "cc-feishu-bridge.log")
+    Path(data_dir).mkdir(exist_ok=True)
+    fh = logging.FileHandler(log_file)
+    fh.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+    logging.getLogger().addHandler(fh)
+    if is_installed:
+        logger.info(f"Config found, starting bridge...")
+    else:
         logger.info("Install complete, starting bridge...")
-        start_bridge(cfg_path, data_dir)
+    start_bridge(cfg_path, data_dir)
 
 
 if __name__ == "__main__":

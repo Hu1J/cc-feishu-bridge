@@ -50,6 +50,7 @@ class ClaudeIntegration:
                 max_turns=self.max_turns,
                 cli_path=self.cli_path,
                 include_partial_messages=True,
+                permission_mode="bypassPermissions",
             )
 
             client = ClaudeSDKClient(options=options)
