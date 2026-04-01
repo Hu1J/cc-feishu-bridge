@@ -74,6 +74,7 @@ class FeishuWSClient:
                     message_type=msg_type,
                     create_time=getattr(message, "create_time", ""),
                 )
+                logger.info(f"Received message from {user_open_id}: {content!r}")
                 try:
                     loop = asyncio.get_running_loop()
                 except RuntimeError:
