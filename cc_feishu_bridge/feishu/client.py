@@ -364,7 +364,7 @@ class FeishuClient:
             logger.error(f"send_file error: {e}")
             raise
 
-    async def send_interactive(self, chat_id: str, card_json: str, reply_to_message_id: str) -> str:
+    async def send_interactive(self, chat_id: str, card: dict, reply_to_message_id: str) -> str:
         """Send an interactive card message, replying to a specific message."""
         import json
         import lark_oapi as lark
@@ -374,7 +374,7 @@ class FeishuClient:
             .message_id(reply_to_message_id)
             .request_body(
                 lark.im.v1.ReplyMessageRequestBody.builder()
-                .content(card_json)
+                .content(json.dumps(card))
                 .msg_type("interactive")
                 .build()
             )
@@ -411,6 +411,62 @@ class FeishuClient:
             raise RuntimeError(f"Failed to reply: {response.msg}")
         logger.info(f"Replied to {reply_to_message_id} in chat {chat_id}: {response.data.message_id}")
         return response.data.message_id
+
+    async def send_post_reply(
+        self,
+        chat_id: str,
+        markdown_text: str,
+        reply_to_message_id: str,
+    ) -> str:
+        """Send a markdown message as a threaded reply using Feishu post format.
+
+        The text is rendered with Feishu's built-in markdown renderer (bold, code,
+        tables, links, etc.) inside a rich text bubble.
+        """
+        import json
+        import lark_oapi as lark
+        client = self._get_client()
+        content_payload = json.dumps({
+            "zh_cn": {
+                "content": [[{"tag": "md", "text": markdown_text}]]
+            }
+        })
+        request = (
+            lark.im.v1.ReplyMessageRequest.builder()
+            .message_id(reply_to_message_id)
+            .request_body(
+                lark.im.v1.ReplyMessageRequestBody.builder()
+                .content(content_payload)
+                .msg_type("post")
+                .build()
+            )
+            .build()
+        )
+        response = await asyncio.to_thread(client.im.v1.message.reply, request)
+        if not response.success():
+            raise RuntimeError(f"Failed to reply (post): {response.msg}")
+        logger.info(f"Replied post to {reply_to_message_id} in chat {chat_id}: {response.data.message_id}")
+        return response.data.message_id
+
+    async def send_interactive_reply(
+        self,
+        chat_id: str,
+        markdown_text: str,
+        reply_to_message_id: str,
+    ) -> str:
+        """Send a markdown message as a threaded reply using Feishu Interactive Card.
+
+        Used for content containing fenced code blocks or markdown tables — these render
+        more richly inside a wide-screen card than in a post bubble.
+        """
+        card = {
+            "schema": "2.0",
+            "config": {"wide_screen_mode": True},
+            "body": {
+                "elements": [{"tag": "markdown", "content": markdown_text}]
+            }
+        }
+        return await self.send_interactive(chat_id, card, reply_to_message_id)
 
     async def send_image_reply(
         self,
@@ -465,7 +521,7 @@ class FeishuClient:
             raise RuntimeError(f"Failed to reply file: {response.msg}")
         return response.data.message_id
 
-    async def update_message(self, message_id: str, card_json: str) -> None:
+    async def update_message(self, message_id: str, card: dict) -> None:
         """Update an existing message's content (used for card status updates)."""
         import json
         import lark_oapi as lark
@@ -475,7 +531,7 @@ class FeishuClient:
             .message_id(message_id)
             .request_body(
                 lark.im.v1.PatchMessageRequestBody.builder()
-                .content(card_json)
+                .content(json.dumps(card))
                 .msg_type("interactive")
                 .build()
             )

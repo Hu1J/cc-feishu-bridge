@@ -120,7 +120,7 @@ async def _poll_auth_result(
         logger.warning(f"Failed to update auth card to failed: {e}")
 
 
-def _make_error_card(error_msg: str) -> str:
+def _make_error_card(error_msg: str) -> dict:
     """Build an error card when device_auth_begin itself fails."""
     from cc_feishu_bridge.feishu.card import make_auth_failed_card
     return make_auth_failed_card(reason=f"发起授权失败: {error_msg}")

@@ -407,9 +407,20 @@ class MessageHandler:
         return HandlerResult(success=True)
 
     async def _safe_send(self, chat_id: str, reply_to_message_id: str, text: str):
-        """Send a text message as a threaded reply, ignoring errors."""
+        """Send a markdown message as a threaded Feishu post/card, ignoring errors.
+
+        Uses Interactive Card for content with fenced code blocks or tables,
+        falls back to rich text post for plain markdown.
+        """
         try:
-            await self.feishu.send_text_reply(chat_id, text, reply_to_message_id)
+            # Optimize and decide format
+            formatted = self.formatter.format_text(text)
+            if not formatted.strip():
+                return
+            if self.formatter.should_use_card(formatted):
+                await self.feishu.send_interactive_reply(chat_id, formatted, reply_to_message_id)
+            else:
+                await self.feishu.send_post_reply(chat_id, formatted, reply_to_message_id)
         except Exception as e:
             logger.warning(f"Failed to send message: {e}")
 
@@ -573,17 +584,17 @@ class MessageHandler:
         )
         return HandlerResult(success=True)
 
-    async def _send_interactive_card(self, chat_id: str, card_json: str, reply_to: str) -> None:
+    async def _send_interactive_card(self, chat_id: str, card: dict, reply_to: str) -> None:
         """Send an interactive card replying to the user's auth command message."""
         try:
-            await self.feishu.send_interactive(chat_id, card_json, reply_to_message_id=reply_to)
+            await self.feishu.send_interactive(chat_id, card, reply_to_message_id=reply_to)
         except Exception as e:
             logger.warning(f"Failed to send auth card: {e}")
 
-    async def _update_interactive_card(self, message_id: str, card_json: str) -> None:
+    async def _update_interactive_card(self, message_id: str, card: dict) -> None:
         """Update an existing interactive message with new card content."""
         try:
-            await self.feishu.update_message(message_id, card_json)
+            await self.feishu.update_message(message_id, card)
         except Exception as e:
             logger.warning(f"Failed to update card message {message_id}: {e}")
 

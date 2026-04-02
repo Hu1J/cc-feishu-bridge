@@ -51,9 +51,15 @@ async def test_sends_auth_card_then_polls():
         # Let the background polling task complete (3 polls at interval=1s each)
         await asyncio.sleep(4)
 
-    # Card should have been sent
+    # Card should have been sent (make_auth_card now returns a dict, not a JSON string)
     assert len(sent_cards) == 1
-    assert "TESTUSER" in sent_cards[0]
+    card = sent_cards[0]
+    assert isinstance(card, dict)
+    # Check user_code appears in markdown element
+    import json
+    body = card["body"]["elements"]
+    md = next(e for e in body if e["tag"] == "markdown")
+    assert "TESTUSER" in md["content"]
     # Token should have been saved after polling
     assert "ou_user1" in token_saved
     assert token_saved["ou_user1"]["access_token"] == "tok_abc"
@@ -86,7 +92,9 @@ async def test_timeout_updates_card_to_failed():
 
     # Should have been updated to failed
     assert len(update_calls) >= 1
-    msg_id, card_json = update_calls[-1]
+    msg_id, card = update_calls[-1]
     assert msg_id == "om_test"
-    # card_json contains unicode-escaped JSON; check for \\u274c (❌) or \\u8f6e\\u8be2 (轮询)
-    assert "\\u274c" in card_json or "\\u8f6e\\u8be2" in card_json
+    # Card now a dict; check header contains error indication
+    assert isinstance(card, dict)
+    assert card["header"]["template"] == "red"
+    assert "失败" in card["header"]["title"]["content"] or "超时" in card["header"]["title"]["content"]

@@ -34,6 +34,8 @@ def handler():
     feishu.app_secret = "sec_456"
     feishu.send_text = AsyncMock(return_value="msg_ok")
     feishu.send_interactive = AsyncMock(return_value="msg_card")
+    feishu.send_post_reply = AsyncMock(return_value="msg_reply_ok")
+    feishu.send_interactive_reply = AsyncMock(return_value="msg_reply_ok")
     feishu.update_message = AsyncMock()
     feishu.add_typing_reaction = AsyncMock(return_value="rx_123")
     feishu.remove_typing_reaction = AsyncMock()
@@ -62,6 +64,9 @@ def handler():
     formatter.format_text.side_effect = lambda x: x
     formatter.split_messages.side_effect = lambda x: [x] if x else []
     formatter.format_tool_call.return_value = "🔧 Tool"
+    # should_use_card is a module-level function; have mock delegate to real impl
+    from cc_feishu_bridge.format.reply_formatter import should_use_card
+    formatter.should_use_card.side_effect = should_use_card
 
     handler = MessageHandler(
         feishu_client=feishu,
@@ -111,9 +116,9 @@ async def test_feishu_help_command(handler):
     msg = make_msg("/feishu")
     # Commands are handled immediately in handle() — no queue involved
     await handler.handle(msg)
-    # send_text_reply(chat_id, text, reply_to_message_id) — text is 2nd positional arg
-    handler.feishu.send_text_reply.assert_called()
-    call_args = handler.feishu.send_text_reply.call_args
+    # Responses now go through send_post_reply (markdown post format)
+    handler.feishu.send_post_reply.assert_called()
+    call_args = handler.feishu.send_post_reply.call_args
     _, text, _ = call_args[0]
     assert "cc-feishu-bridge" in text
     assert "/new" in text
@@ -128,8 +133,8 @@ async def test_unknown_command_returns_error(handler):
     msg = make_msg("/foobar")
     # Commands are handled immediately in handle() — no queue involved
     await handler.handle(msg)
-    handler.feishu.send_text_reply.assert_called()
-    _, text, _ = handler.feishu.send_text_reply.call_args[0]
+    handler.feishu.send_post_reply.assert_called()
+    _, text, _ = handler.feishu.send_post_reply.call_args[0]
     assert "未知命令" in text
 
 
@@ -141,8 +146,8 @@ async def test_stop_command_when_no_active_query(handler):
     # Call _handle_stop directly to bypass the queue/worker mechanics
     result = await handler._handle_stop(msg)
     assert result.success
-    handler.feishu.send_text_reply.assert_called()
-    _, text, _ = handler.feishu.send_text_reply.call_args[0]
+    handler.feishu.send_post_reply.assert_called()
+    _, text, _ = handler.feishu.send_post_reply.call_args[0]
     assert "当前没有正在运行的查询" in text
     handler.claude.interrupt_current.assert_not_called()
 

@@ -15,9 +15,9 @@ def _card_payload(header_title: str, header_template: str, body_elements: list) 
     }
 
 
-def make_auth_card(verification_url: str, user_code: str, expires_minutes: int = 5) -> str:
+def make_auth_card(verification_url: str, user_code: str, expires_minutes: int = 5) -> dict:
     """Build the pending auth card sent to the user immediately after /feishu auth."""
-    content = _card_payload(
+    return _card_payload(
         header_title="📋 授权 cc-feishu-bridge",
         header_template="blue",
         body_elements=[
@@ -52,12 +52,11 @@ def make_auth_card(verification_url: str, user_code: str, expires_minutes: int =
             },
         ],
     )
-    return json.dumps({"msg_type": "interactive", "content": json.dumps(content)})
 
 
-def make_auth_success_card() -> str:
+def make_auth_success_card() -> dict:
     """Build the success card updated after user completes auth."""
-    content = _card_payload(
+    return _card_payload(
         header_title="✅ 授权成功",
         header_template="green",
         body_elements=[
@@ -71,12 +70,11 @@ def make_auth_success_card() -> str:
             }
         ],
     )
-    return json.dumps({"msg_type": "interactive", "content": json.dumps(content)})
 
 
-def make_auth_failed_card(reason: str = "授权失败") -> str:
+def make_auth_failed_card(reason: str = "授权失败") -> dict:
     """Build the failed card when auth times out or is denied."""
-    content = _card_payload(
+    return _card_payload(
         header_title=f"❌ {reason}",
         header_template="red",
         body_elements=[
@@ -86,4 +84,3 @@ def make_auth_failed_card(reason: str = "授权失败") -> str:
             }
         ],
     )
-    return json.dumps({"msg_type": "interactive", "content": json.dumps(content)})
