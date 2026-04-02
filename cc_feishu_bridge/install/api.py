@@ -179,9 +179,13 @@ class FeishuInstallAPI:
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
+        resp.raise_for_status()
         data = resp.json()
         if data.get("error"):
             raise RuntimeError(f"Device auth error: {data['error']}")
+        missing = [k for k in ("device_code", "verification_uri", "verification_uri_complete") if not data.get(k)]
+        if missing:
+            raise RuntimeError(f"Device auth response missing fields: {missing}")
         return DeviceAuthResult(
             device_code=data["device_code"],
             verification_uri=data["verification_uri"],
@@ -204,11 +208,14 @@ class FeishuInstallAPI:
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
+        resp.raise_for_status()
         data = resp.json()
         if data.get("error") == "authorization_pending":
             return None  # Still waiting
         if data.get("error"):
             raise RuntimeError(f"Auth failed: {data['error']}")
+        if not data.get("access_token"):
+            raise RuntimeError("Device auth poll response missing access_token")
         return {
             "access_token": data["access_token"],
             "refresh_token": data.get("refresh_token", ""),
