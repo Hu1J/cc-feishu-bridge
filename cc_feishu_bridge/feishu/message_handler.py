@@ -180,10 +180,13 @@ class MessageHandler:
             await self._safe_send(message.chat_id, message.message_id, "暂不支持该消息类型，请发送文字消息。")
             return
 
-        ok, err = self.validator.validate(message.content)
-        if not ok:
-            await self._safe_send(message.chat_id, message.message_id, f"⚠️ {err}")
-            return
+        # Only validate text content — media messages (image/file/audio) have empty
+        # content at this stage and will get their path-injected content in _run_query.
+        if message.message_type == "text":
+            ok, err = self.validator.validate(message.content)
+            if not ok:
+                await self._safe_send(message.chat_id, message.message_id, f"⚠️ {err}")
+                return
 
         session = self.sessions.get_active_session(message.user_open_id)
         sdk_session_id = session.sdk_session_id if session else None
