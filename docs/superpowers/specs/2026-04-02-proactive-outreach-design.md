@@ -45,6 +45,7 @@ proactive:
   time_window_end: "22:00"
   silence_threshold_minutes: 60
   check_interval_minutes: 5
+  max_per_day: 3        # 每天最多推送次数，0 或 false 表示不限次数
 ```
 
 ## 数据变更
@@ -55,6 +56,7 @@ proactive:
 |------|------|------|
 | `last_message_at` | TIMESTAMP | 用户最后发消息的时间 |
 | `proactive_sent_today` | DATE | 最后一次主动推送的日期（每天清零） |
+| `proactive_today_count` | INT | 当天已主动推送次数 |
 
 ## 新增文件
 
@@ -75,7 +77,7 @@ proactive:
 
 1. **不走 worker 队列**：主动推送是独立触发的，直接调 Feishu API 发消息，不经过消息队列，不会打断用户正在进行的对话
 2. **复用现有链路**：Claude 调用走现有的 `ClaudeIntegration`，只不过不经过 `MessageHandler`
-3. **每天发一次上限**：用 `proactive_sent_today` 字段控制，同一天不重复推送；每天零点自动重置
+3. **每天次数上限**：用 `proactive_today_count` 字段控制，默认每天最多 3 次；`max_per_day: 0` 表示不限次数，时间窗口内沉默超阈值就发
 4. **错误静默**：Claude 调用失败或发飞书失败时静默跳过，不影响 bridge 主流程
 
 ## 主动消息格式
@@ -92,7 +94,8 @@ proactive:
 
 - 时间窗口外不触发
 - 沉默阈值内不触发
-- 主动推送后同一天不再触发
-- 第二天重新触发
+- 主动推送后当天计数 +1，超限后不再触发
+- 第二天重新触发（计数清零）
+- max_per_day: 0 时不限次数，每次沉默超阈值都触发
 - 用户发消息后重置计时
 - bridge 重启后状态不丢失
