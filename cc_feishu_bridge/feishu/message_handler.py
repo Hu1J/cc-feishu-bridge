@@ -42,8 +42,9 @@ class StreamAccumulator:
     Tracks `sent_something` so the caller knows whether to skip the final response.
     """
 
-    def __init__(self, chat_id: str, send_fn, flush_timeout: float = 1.5):
+    def __init__(self, chat_id: str, message_id: str, send_fn, flush_timeout: float = 1.5):
         self.chat_id = chat_id
+        self._message_id = message_id
         self._send = send_fn
         self._flush_timeout = flush_timeout
         self._buffer = ""
@@ -71,7 +72,7 @@ class StreamAccumulator:
                 text = self._buffer
                 self._buffer = ""
                 if text.strip():
-                    await self._send(self.chat_id, text)
+                    await self._send(self.chat_id, self._message_id, text)
                     self.sent_something = True
 
     async def _flush_after(self, delay: float) -> None:
@@ -83,7 +84,7 @@ class StreamAccumulator:
                     text = self._buffer
                     self._buffer = ""
                     if text.strip():
-                        await self._send(self.chat_id, text)
+                        await self._send(self.chat_id, self._message_id, text)
                         self.sent_something = True
         except asyncio.CancelledError:
             pass
@@ -109,55 +110,61 @@ class MessageHandler:
         self.formatter = formatter
         self.approved_directory = approved_directory
         self.data_dir = data_dir
-        self._active_task: asyncio.Task | None = None
-        self._active_user_id: str | None = None
+        self._queue: asyncio.Queue[IncomingMessage] = asyncio.Queue()
+        self._worker_task: asyncio.Task | None = None
+        self._current_message_id: str = ""
 
     async def handle(self, message: IncomingMessage) -> HandlerResult:
-        """Main entry point for processing an incoming message."""
-        # 1. Auth check
+        """将消息入队，立即返回。由 Worker 串行处理。"""
+        await self._queue.put(message)
+        if self._worker_task is None or self._worker_task.done():
+            self._worker_task = asyncio.create_task(self._worker_loop())
+        return HandlerResult(success=True)
+
+    async def _worker_loop(self) -> None:
+        """串行出队并处理消息。"""
+        while True:
+            try:
+                message = await self._queue.get()
+                try:
+                    self._current_message_id = message.message_id
+                    await self._process_message(message)
+                finally:
+                    self._current_message_id = ""
+                    self._queue.task_done()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Worker loop error")
+
+    async def _process_message(self, message: IncomingMessage) -> None:
+        """处理单条消息：鉴权 → 命令 → 媒体预处理 → 引用检测 → 查询。"""
         auth_result = self.auth.authenticate(message.user_open_id)
         if not auth_result.authorized:
             logger.info(f"Ignoring message from unauthorized user: {message.user_open_id}")
-            return HandlerResult(success=True, response_text=None)  # Silently ignore
+            return
 
-        # 2. Handle commands — but not Unix paths that start with /
-        # Commands look like "/stop", "/new", "/feishu auth" — NOT "/Users/..." or "/tmp/..."
         if message.content.startswith("/") and _is_command(message.content):
-            return await self._handle_command(message)
+            result = await self._handle_command(message)
+            if result.response_text:
+                await self._safe_send(message.chat_id, message.message_id, result.response_text)
+            return
 
-        # Handle non-text, non-media message types (audio, etc.)
-        if message.message_type not in ("text", "image", "file"):
-            return HandlerResult(
-                success=True,
-                response_text="暂不支持该消息类型，请发送文字消息。",
-            )
+        if message.message_type not in ("text", "image", "file", "audio"):
+            await self._safe_send(message.chat_id, message.message_id, "暂不支持该消息类型，请发送文字消息。")
+            return
 
-        # 3. Input validation
         ok, err = self.validator.validate(message.content)
         if not ok:
-            return HandlerResult(
-                success=False,
-                response_text=f"⚠️ {err}",
-            )
+            await self._safe_send(message.chat_id, message.message_id, f"⚠️ {err}")
+            return
 
-        # 4. Get or create session
         session = self.sessions.get_active_session(message.user_open_id)
-        # Use SDK's session ID if available, so Claude can maintain context
         sdk_session_id = session.sdk_session_id if session else None
-
-        # Update chat_id for this user (so send command knows where to reply)
         if session and session.chat_id != message.chat_id:
             self.sessions.update_chat_id(message.user_open_id, message.chat_id)
 
-        # 5. Re-entrant check: if Claude is already running for this user, ignore
-        if self._active_task is not None and self._active_user_id == message.user_open_id:
-            await self._safe_send(message.chat_id, "⏳ Claude 正在回复中，请稍候...")
-            return HandlerResult(success=True)
-
-        # 6. Kick off query as background task and return immediately
-        self._active_task = asyncio.create_task(self._run_query(message, session, sdk_session_id))
-        self._active_user_id = message.user_open_id
-        return HandlerResult(success=True)
+        await self._run_query(message, session, sdk_session_id)
 
     async def _handle_command(self, message: IncomingMessage) -> HandlerResult:
         """Handle slash commands like /new, /status."""
@@ -229,9 +236,9 @@ class MessageHandler:
             reaction_id = await self.feishu.add_typing_reaction(message.message_id)
             logger.info(f"[typing] on — user={message.user_open_id}, reaction_id={reaction_id!r}")
 
-            # Preprocess media (image/file) before querying Claude
+            # Preprocess media (image/file/audio) before querying Claude
             media_prompt_prefix = ""
-            if message.message_type in ("image", "file"):
+            if message.message_type in ("image", "file", "audio"):
                 try:
                     media_prompt_prefix = await self._preprocess_media(message)
                     if media_prompt_prefix:
@@ -240,11 +247,27 @@ class MessageHandler:
                     logger.warning(f"Failed to process inbound media: {e}")
                     media_prompt_prefix = ""
 
+            # Resolve quoted message content
+            quoted_content = ""
+            if message.parent_id:
+                try:
+                    quoted_msg = await self.feishu.get_message(message.parent_id)
+                    if quoted_msg:
+                        sender_name = quoted_msg.get("sender", {}).get("name", "")
+                        quoted_text = self._extract_quoted_content(quoted_msg)
+                        if sender_name:
+                            quoted_content = f"[引用消息: {message.parent_id}] {sender_name}: {quoted_text}"
+                        else:
+                            quoted_content = f"[引用消息: {message.parent_id}] {quoted_text}"
+                        logger.info(f"Quoted message {message.parent_id}: {quoted_text[:100]!r}")
+                except Exception:
+                    logger.warning(f"Failed to fetch quoted message {message.parent_id}")
+
             # Accumulator sends text chunks to Feishu in real-time (with buffering).
             # Tool calls flush text immediately, then are sent separately.
             # After streaming, if text was sent during stream, skip the final response
             # to avoid duplication — the streamed content is already there.
-            accumulator = StreamAccumulator(message.chat_id, self._safe_send)
+            accumulator = StreamAccumulator(message.chat_id, message.message_id, self._safe_send)
 
             async def stream_callback(claude_msg):
                 if claude_msg.tool_name:
@@ -254,16 +277,14 @@ class MessageHandler:
                         claude_msg.tool_input,
                     )
                     logger.info(f"[stream] tool: {claude_msg.tool_name}")
-                    await self._safe_send(message.chat_id, tool_text)
+                    await self._safe_send(message.chat_id, message.message_id, tool_text)
                 elif claude_msg.content:
                     logger.info(f"[stream] text: {claude_msg.content[:100]}")
                     await accumulator.add_text(claude_msg.content)
 
-            full_prompt = (
-                f"{media_prompt_prefix}\n{message.content}".strip()
-                if media_prompt_prefix
-                else message.content
-            )
+            prefix_parts = [p for p in [media_prompt_prefix, quoted_content] if p]
+            prefix = "\n".join(prefix_parts) + "\n" if prefix_parts else ""
+            full_prompt = (prefix + message.content).strip()
             response, new_session_id, cost = await self.claude.query(
                 prompt=full_prompt,
                 session_id=sdk_session_id,
@@ -293,39 +314,50 @@ class MessageHandler:
                 formatted = self.formatter.format_text(response)
                 chunks = self.formatter.split_messages(formatted)
                 for chunk in chunks:
-                    await self._safe_send(message.chat_id, chunk)
+                    await self._safe_send(message.chat_id, message.message_id, chunk)
 
             logger.info(f"Replied to {message.user_open_id} in chat {message.chat_id} | reply: {response[:300]}")
 
         except asyncio.CancelledError:
-            await self._safe_send(message.chat_id, "🛑 已打断 Claude。")
+            await self._safe_send(message.chat_id, message.message_id, "🛑 已打断 Claude。")
         except Exception as e:
             logger.exception(f"Error in _run_query: {e}")
         finally:
-            self._active_task = None
-            self._active_user_id = None
             if reaction_id:
                 logger.info(f"[typing] off — user={message.user_open_id}, reaction_id={reaction_id!r}")
                 await self.feishu.remove_typing_reaction(message.message_id, reaction_id)
 
     async def _handle_stop(self, message: IncomingMessage) -> HandlerResult:
-        """Handle /stop — interrupt the running Claude query."""
-        if self._active_task is None:
-            return HandlerResult(success=True, response_text="当前没有正在运行的查询。")
-        interrupted = await self.claude.interrupt_current()
-        if self._active_task is not None:
-            self._active_task.cancel()
-            self._active_task = None
-        self._active_user_id = None
-        await self._safe_send(message.chat_id, "🛑 已发送停止信号，Claude 将中断当前任务。")
+        """Handle /stop — cancel the current worker task."""
+        if self._worker_task is None or self._worker_task.done():
+            await self._safe_send(message.chat_id, message.message_id, "当前没有正在运行的查询。")
+            return HandlerResult(success=True)
+        self._worker_task.cancel()
+        self._worker_task = None
+        await self._safe_send(message.chat_id, message.message_id, "🛑 已发送停止信号，Claude 将中断当前任务。")
         return HandlerResult(success=True)
 
-    async def _safe_send(self, chat_id: str, text: str):
-        """Send message, ignoring errors (e.g., rate limits)."""
+    async def _safe_send(self, chat_id: str, reply_to_message_id: str, text: str):
+        """Send a text message as a threaded reply, ignoring errors."""
         try:
-            await self.feishu.send_text(chat_id, text)
+            await self.feishu.send_text_reply(chat_id, text, reply_to_message_id)
         except Exception as e:
             logger.warning(f"Failed to send message: {e}")
+
+    def _extract_quoted_content(self, message: dict) -> str:
+        """Extract text content from a fetched message dict."""
+        msg_type = message.get("msg_type", "")
+        content_str = message.get("content", "{}")
+        try:
+            import json
+            content = json.loads(content_str)
+            if msg_type == "text":
+                return content.get("text", "")
+            elif msg_type == "post":
+                return content.get("text", "")
+        except Exception:
+            pass
+        return str(content_str)
 
     async def _preprocess_media(self, message: IncomingMessage) -> str:
         """Download and save inbound media, return the text to prepend to prompt.
@@ -339,7 +371,7 @@ class MessageHandler:
             save_bytes,
         )
 
-        if message.message_type not in ("image", "file"):
+        if message.message_type not in ("image", "file", "audio"):
             return ""
 
         msg_id = message.message_id
@@ -375,6 +407,24 @@ class MessageHandler:
             save_bytes(save_path, data)
             return f"[文件: {save_path}]"
 
+        elif message.message_type == "audio":
+            try:
+                file_key = content.get("file_key", "")
+                duration_ms = content.get("duration", 0)
+                if not file_key:
+                    return ""
+                from cc_feishu_bridge.feishu.media import make_audio_path
+                data = await self.feishu.download_media(msg_id, file_key, msg_type="audio")
+                base_path = make_audio_path(data_dir, msg_id)
+                save_path = base_path + ".opus"
+                save_bytes(save_path, data)
+                duration_s = duration_ms / 1000 if duration_ms else None
+                duration_str = f" ({duration_s:.1f}s)" if duration_s else ""
+                return f"[Audio: {save_path}{duration_str}]"
+            except Exception as e:
+                logger.warning(f"Failed to process audio message: {e}")
+                return ""
+
         return ""
 
     async def _handle_feishu_auth(self, message: IncomingMessage) -> HandlerResult:
@@ -396,6 +446,7 @@ class MessageHandler:
         # Acknowledge immediately
         await self._safe_send(
             message.chat_id,
+            message.message_id,
             "🔐 正在发起授权，请稍候...",
         )
 

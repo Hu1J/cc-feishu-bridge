@@ -116,3 +116,10 @@ EXT_TO_FILE_TYPE = {
 def guess_file_type(ext: str) -> str:
     """扩展名（如 '.pdf'）→ 飞书 file_type（如 'pdf'）。未知默认 'zip'。"""
     return EXT_TO_FILE_TYPE.get(ext.lower(), "zip")
+
+
+def make_audio_path(data_dir: str, msg_id: str) -> str:
+    """Return the path for saving an inbound audio file."""
+    audio_dir = os.path.join(data_dir, "received_audio")
+    os.makedirs(audio_dir, exist_ok=True)
+    return os.path.join(audio_dir, f"{msg_id}")
