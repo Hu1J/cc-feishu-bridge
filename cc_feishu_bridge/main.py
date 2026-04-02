@@ -294,14 +294,13 @@ def run_send_command(file_paths: list[str], config_path: str) -> None:
     except ImportError:
         guess_file_type = None
 
-    async def send_one(file_path: str) -> None:
+    async def send_one(file_path: str) -> str:
+        """Send a single file. Raises on error so gather() can collect it."""
         if not os.path.exists(file_path):
-            print(f"Error: file not found: {file_path}")
-            return
+            raise FileNotFoundError(f"File not found: {file_path}")
         size = os.path.getsize(file_path)
         if size > MAX_FILE_SIZE:
-            print(f"Error: {file_path} exceeds 30MB limit")
-            return
+            raise ValueError(f"{file_path} exceeds 30MB limit")
 
         with open(file_path, "rb") as f:
             data = f.read()
@@ -322,9 +321,15 @@ def run_send_command(file_paths: list[str], config_path: str) -> None:
             msg_id = await feishu.send_file(chat_id, file_key, file_name)
             print(f"Sent file: {file_name} → {msg_id}")
 
+        return msg_id
+
     async def main_async():
-        for fp in file_paths:
-            await send_one(fp)
+        # Upload all files concurrently, then send all concurrently.
+        # Feishu renders consecutive image messages grouped together.
+        results = await asyncio.gather(*[send_one(fp) for fp in file_paths], return_exceptions=True)
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                print(f"Error sending {file_paths[i]}: {result}")
 
     asyncio.run(main_async())
 

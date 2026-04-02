@@ -22,10 +22,10 @@ description: |
 cc-feishu-bridge send /path/to/file.png --config /path/to/.cc-feishu-bridge/config.yaml
 ```
 
-一次可以发送多个文件：
+一次可以发送多个文件（并发上传、并发发送，速度更快）：
 
 ```bash
-cc-feishu-bridge send file1.png file2.pdf --config /path/to/.cc-feishu-bridge/config.yaml
+cc-feishu-bridge send chart.png output.pdf --config /path/to/.cc-feishu-bridge/config.yaml
 ```
 
 ## 注意事项

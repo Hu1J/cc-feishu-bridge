@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 -->
 
 <!-- Add new changes here before each release. Move to a version section below when tagging. -->
+- **多文件并发发送**：`cc-feishu-bridge send` 支持一次传入多个文件，所有文件并发上传、并发发送，显著提升批量发送速度（图片、文件可混合）
 
 ## [0.1.1] - 2026-04-02
 
