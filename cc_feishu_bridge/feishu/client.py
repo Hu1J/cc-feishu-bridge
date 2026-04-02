@@ -195,6 +195,60 @@ class FeishuClient:
             logger.error(f"send_image error: {e}")
             raise
 
+    async def upload_file(self, file_bytes: bytes, file_name: str, file_type: str) -> str:
+        """Upload a file to Feishu and return the file_key."""
+        import io
+        import lark_oapi as lark
+        client = self._get_client()
+        request = (
+            lark.im.v1.CreateFileRequest.builder()
+            .request_body(
+                lark.im.v1.CreateFileRequestBody.builder()
+                .file(io.BytesIO(file_bytes))
+                .file_name(file_name)
+                .file_type(file_type)
+                .file_size(str(len(file_bytes)))
+                .build()
+            )
+            .build()
+        )
+        try:
+            response = await asyncio.to_thread(client.im.v1.file.create, request)
+            if not response.success():
+                raise RuntimeError(f"Failed to upload file: {response.msg}")
+            logger.info(f"Uploaded file: {response.data.file_key} ({file_name})")
+            return response.data.file_key
+        except Exception as e:
+            logger.error(f"upload_file error: {e}")
+            raise
+
+    async def send_file(self, chat_id: str, file_key: str, file_name: str) -> str:
+        """Send a file message to a Feishu chat."""
+        import json
+        import lark_oapi as lark
+        client = self._get_client()
+        request = (
+            lark.im.v1.CreateMessageRequest.builder()
+            .receive_id_type("chat_id")
+            .request_body(
+                lark.im.v1.CreateMessageRequestBody.builder()
+                .receive_id(chat_id)
+                .content(json.dumps({"file_key": file_key, "file_name": file_name}))
+                .msg_type("file")
+                .build()
+            )
+            .build()
+        )
+        try:
+            response = await asyncio.to_thread(client.im.v1.message.create, request)
+            if not response.success():
+                raise RuntimeError(f"Failed to send file: {response.msg}")
+            logger.info(f"Sent file {file_name} to {chat_id}: {response.data.message_id}")
+            return response.data.message_id
+        except Exception as e:
+            logger.error(f"send_file error: {e}")
+            raise
+
     def _extract_file_info(self, content_str: str) -> tuple[str, str]:
         """Extract original filename and file_type from file message content."""
         import json
