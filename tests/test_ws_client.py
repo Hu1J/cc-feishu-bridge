@@ -28,6 +28,8 @@ def test_on_message_callback():
     mock_event.event.message.msg_type = "text"
     mock_event.event.message.content = '{"text":"hello"}'
     mock_event.event.message.create_time = "1234567890"
+    mock_event.event.message.parent_id = "om_parent_456"
+    mock_event.event.message.thread_id = "om_thread_789"
 
     mock_sender = MagicMock()
     mock_sender.sender_id.open_id = "user_xyz"
@@ -53,3 +55,5 @@ def test_on_message_callback():
     assert msg.chat_id == "chat_abc"
     assert msg.user_open_id == "user_xyz"
     assert msg.content == "hello"
+    assert msg.parent_id == "om_parent_456"
+    assert msg.thread_id == "om_thread_789"
