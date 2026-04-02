@@ -9,6 +9,8 @@ import argparse
 import asyncio
 import logging
 import os
+
+from cc_feishu_bridge.banner import print_banner, write_log_banner
 import shutil
 import signal
 import sys
@@ -444,6 +446,14 @@ def main(args=None):
 
     args = parser.parse_args(args)
 
+    # Print banner before any logging setup
+    try:
+        from importlib.metadata import version as get_version
+        _version = get_version("cc-feishu-bridge")
+    except Exception:
+        _version = "dev"
+    print_banner(_version)
+
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except AttributeError:
@@ -498,6 +508,7 @@ def main(args=None):
     fh = logging.FileHandler(log_file)
     fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logging.getLogger().addHandler(fh)
+    write_log_banner(log_file, _version)
     if is_installed:
         logger.info(f"Config found, starting bridge...")
     else:
