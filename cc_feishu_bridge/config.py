@@ -41,12 +41,23 @@ class ServerConfig:
 
 
 @dataclass
+class ProactiveConfig:
+    enabled: bool = False
+    time_window_start: str = "08:00"   # HH:MM 格式
+    time_window_end: str = "22:00"      # HH:MM 格式
+    silence_threshold_minutes: int = 60
+    check_interval_minutes: int = 5
+    max_per_day: int = 3              # 0 表示不限次数
+
+
+@dataclass
 class Config:
     feishu: FeishuConfig
     auth: AuthConfig
     claude: ClaudeConfig
     storage: StorageConfig
     server: ServerConfig
+    proactive: ProactiveConfig = field(default_factory=ProactiveConfig)
     data_dir: str = ""
     bypass_accepted: bool = False
 
@@ -56,12 +67,14 @@ def load_config(path: str, data_dir: str = "") -> Config:
     with open(path) as f:
         raw = yaml.safe_load(f)
 
+    proactive = ProactiveConfig(**raw.get("proactive", {}))
     return Config(
         feishu=FeishuConfig(**raw.get("feishu", {})),
         auth=AuthConfig(**raw.get("auth", {})),
         claude=ClaudeConfig(**raw.get("claude", {})),
         storage=StorageConfig(**raw.get("storage", {})),
         server=ServerConfig(**raw.get("server", {})),
+        proactive=proactive,
         data_dir=data_dir,
         bypass_accepted=raw.get("bypass_accepted", False),
     )
