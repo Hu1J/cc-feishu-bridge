@@ -243,8 +243,6 @@ class MessageHandler:
         elif cmd == "/stop":
             return await self._handle_stop(message)
 
-        elif cmd == "/feishu" and arg.startswith("auth"):
-            return await self._handle_feishu_auth(message)
         elif cmd == "/feishu":
             return HandlerResult(
                 success=True,
@@ -252,8 +250,7 @@ class MessageHandler:
                     "cc-feishu-bridge 命令：\n"
                     "• /new — 新建会话\n"
                     "• /status — 会话状态\n"
-                    "• /stop — 打断当前查询\n"
-                    "• /feishu auth — 授权机器人权限（如文件上传）"
+                    "• /stop — 打断当前查询"
                 ),
             )
 
@@ -547,73 +544,3 @@ class MessageHandler:
 
         return ""
 
-    async def _handle_feishu_auth(self, message: IncomingMessage) -> HandlerResult:
-        """Send auth card to user and start background polling."""
-        from cc_feishu_bridge.feishu.auth_flow import run_auth_flow
-        from cc_feishu_bridge.feishu.token_store import UserTokenStore
-
-        # Check if already authorized
-        token_store = UserTokenStore(
-            os.path.join(self.data_dir, "user_tokens.yaml")
-        )
-        existing = token_store.load(message.user_open_id)
-        if existing:
-            return HandlerResult(
-                success=True,
-                response_text="✅ 已完成授权，机器人已有上传文件的权限。",
-            )
-
-        # Acknowledge immediately
-        await self._safe_send(
-            message.chat_id,
-            message.message_id,
-            "🔐 正在发起授权，请稍候...",
-        )
-
-        # Start auth flow in background
-        asyncio.create_task(
-            run_auth_flow(
-                app_id=self.feishu.app_id,
-                app_secret=self.feishu.app_secret,
-                user_open_id=message.user_open_id,
-                chat_id=message.chat_id,
-                message_id=message.message_id,
-                send_card_fn=self._send_interactive_card,
-                update_card_fn=self._update_interactive_card,
-                save_token_fn=self._save_user_token,
-                scopes=["im:message", "im:file", "im:resource"],
-                brand=self.feishu.brand,
-            )
-        )
-        return HandlerResult(success=True)
-
-    async def _send_interactive_card(self, chat_id: str, card: dict, reply_to: str) -> None:
-        """Send an interactive card replying to the user's auth command message."""
-        try:
-            await self.feishu.send_interactive(chat_id, card, reply_to_message_id=reply_to)
-        except Exception as e:
-            logger.warning(f"Failed to send auth card: {e}")
-
-    async def _update_interactive_card(self, message_id: str, card: dict) -> None:
-        """Update an existing interactive message with new card content."""
-        try:
-            await self.feishu.update_message(message_id, card)
-        except Exception as e:
-            logger.warning(f"Failed to update card message {message_id}: {e}")
-
-    async def _save_user_token(self, user_open_id: str, token_data: dict) -> None:
-        """Persist user token to disk with expiry time."""
-        import datetime
-        from cc_feishu_bridge.feishu.token_store import UserTokenStore
-        token_store = UserTokenStore(
-            os.path.join(self.data_dir, "user_tokens.yaml")
-        )
-        expires_at = (
-            datetime.datetime.utcnow()
-            + datetime.timedelta(seconds=token_data.get("expires_in", 7200))
-        ).isoformat() + "Z"
-        token_store.save(user_open_id, {
-            "access_token": token_data["access_token"],
-            "refresh_token": token_data.get("refresh_token", ""),
-            "expires_at": expires_at,
-        })

@@ -115,13 +115,11 @@ class FeishuClient:
         app_secret: str,
         bot_name: str = "Claude",
         data_dir: str = "",
-        brand: str = "feishu",
     ):
         self.app_id = app_id
         self.app_secret = app_secret
         self.bot_name = bot_name
         self.data_dir = data_dir
-        self.brand = brand  # "feishu" or "lark"
         self._client = None
 
     def _get_client(self):
@@ -525,25 +523,6 @@ class FeishuClient:
         if not response.success():
             raise RuntimeError(f"Failed to reply file: {response.msg}")
         return response.data.message_id
-
-    async def update_message(self, message_id: str, card: dict) -> None:
-        """Update an existing message's content (used for card status updates)."""
-        import json
-        import lark_oapi as lark
-        client = self._get_client()
-        request = (
-            lark.im.v1.PatchMessageRequest.builder()
-            .message_id(message_id)
-            .request_body(
-                lark.im.v1.PatchMessageRequestBody.builder()
-                .content(json.dumps(card))
-                .build()
-            )
-            .build()
-        )
-        response = await asyncio.to_thread(client.im.v1.message.patch, request)
-        if not response.success():
-            raise RuntimeError(f"Failed to update message: {response.msg}")
 
     def _extract_file_info(self, content_str: str) -> tuple[str, str]:
         """Extract original filename and file_type from file message content."""

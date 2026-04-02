@@ -30,57 +30,30 @@ class BeginResult:
     user_code: Optional[str] = None
 
 
-@dataclass
-class DeviceAuthResult:
-    device_code: str
-    verification_uri: str
-    verification_uri_complete: str
-    expires_in: int
-    interval: int
-    user_code: str
-
-
 class FeishuInstallAPI:
     """
     Feishu App Registration API using OAuth Device Flow.
 
-    Endpoints (aligned with @larksuite/openclaw-lark device-flow.js):
-      - Device auth begin : POST /oauth/v1/device_authorization
-      - Token exchange   : POST /open-apis/authen/v2/oauth/token
-      - App registration  : POST /oauth/v1/app/registration (init/begin/poll)
+    Endpoints:
+      - App registration : POST /oauth/v1/app/registration (init/begin/poll)
 
     Brand-aware base URLs:
       - Feishu accounts : https://accounts.feishu.cn
       - Lark  accounts  : https://accounts.larksuite.com
-      - Feishu open     : https://open.feishu.cn
-      - Lark  open     : https://open.larksuite.com
     """
 
     BASE_ACCOUNTS_FEISHU = "https://accounts.feishu.cn"
     BASE_ACCOUNTS_LARK = "https://accounts.larksuite.com"
-    BASE_OPEN_FEISHU = "https://open.feishu.cn"
-    BASE_OPEN_LARK = "https://open.larksuite.com"
 
     def __init__(self, app_id: str = "", app_secret: str = "", brand: str = "feishu"):
         self.app_id = app_id
         self.app_secret = app_secret
         self.brand = brand  # "feishu" or "lark"
         self._accounts_base = self.BASE_ACCOUNTS_LARK if brand == "lark" else self.BASE_ACCOUNTS_FEISHU
-        self._open_base = self.BASE_OPEN_LARK if brand == "lark" else self.BASE_OPEN_FEISHU
         self._client: Optional[httpx.AsyncClient] = None
 
     def _accounts_url(self, path: str) -> str:
         return f"{self._accounts_base}{path}"
-
-    def _open_url(self, path: str) -> str:
-        return f"{self._open_base}{path}"
-
-    def _basic_auth(self) -> str:
-        """HTTP Basic Auth header for client credentials (appId:appSecret)."""
-        import base64
-        return "Basic " + base64.b64encode(
-            f"{self.app_id}:{self.app_secret}".encode()
-        ).decode()
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Return a shared client with cookie persistence (for nonce tracking)."""
@@ -181,82 +154,3 @@ class FeishuInstallAPI:
             await asyncio.sleep(interval)
 
         raise RuntimeError("扫码超时，请重新运行安装命令")
-
-    async def device_auth_begin(self, scopes: list[str]) -> DeviceAuthResult:
-        """Start OAuth Device Authorization flow for user auth.
-
-        Uses HTTP Basic Auth (app_id:app_secret) per RFC 8628 and Feishu's
-        device authorization endpoint requirements. The client_secret is NOT
-        sent in the request body — only client_id + scope.
-        Only requests offline_access; other user-level scopes are determined by
-        the app's configuration in the Feishu developer console, not by this call.
-        """
-        import base64
-        client = await self._get_client()
-        credentials = base64.b64encode(
-            f"{self.app_id}:{self.app_secret}".encode()
-        ).decode()
-        # Only request offline_access; app-specific scopes are controlled via the
-        # Feishu developer console, not the device auth request. This avoids
-        # "invalid_scope" when the app hasn't enabled those permissions.
-        scope_str = "offline_access"
-        resp = await client.post(
-            self._accounts_url("/oauth/v1/device_authorization"),
-            data={
-                "client_id": self.app_id,
-                "scope": scope_str,
-            },
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Authorization": f"Basic {credentials}",
-            },
-        )
-        logger.info(f"[device_auth_begin] status={resp.status_code} body={resp.text[:200]}")
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("error"):
-            raise RuntimeError(f"Device auth error: {data['error']}")
-        missing = [k for k in ("device_code", "verification_uri", "verification_uri_complete") if not data.get(k)]
-        if missing:
-            raise RuntimeError(f"Device auth response missing fields: {missing}")
-        return DeviceAuthResult(
-            device_code=data["device_code"],
-            verification_uri=data["verification_uri"],
-            verification_uri_complete=data["verification_uri_complete"],
-            expires_in=data.get("expires_in", 300),
-            interval=data.get("interval", 5),
-            user_code=data.get("user_code", ""),
-        )
-
-    async def device_auth_poll(self, device_code: str) -> dict | None:
-        """Poll for user authorization. Returns token dict on success, None if still pending."""
-        import base64
-        client = await self._get_client()
-        credentials = base64.b64encode(
-            f"{self.app_id}:{self.app_secret}".encode()
-        ).decode()
-        resp = await client.post(
-            self._open_url("/open-apis/authen/v2/oauth/token"),
-            data={
-                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                "device_code": device_code,
-            },
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Authorization": f"Basic {credentials}",
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("error") == "authorization_pending":
-            return None  # Still waiting
-        if data.get("error"):
-            raise RuntimeError(f"Auth failed: {data['error']}")
-        if not data.get("access_token"):
-            raise RuntimeError("Device auth poll response missing access_token")
-        return {
-            "access_token": data["access_token"],
-            "refresh_token": data.get("refresh_token", ""),
-            "expires_in": data.get("expires_in", 0),
-            "token_type": data.get("token_type", "Bearer"),
-        }
