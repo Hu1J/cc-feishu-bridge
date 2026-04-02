@@ -210,6 +210,88 @@ async def interactive_install() -> tuple[str, str]:
     return cfg_path, data_dir
 
 
+SUPPORTED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+MAX_FILE_SIZE = 30 * 1024 * 1024  # 30MB
+
+
+def run_send_command(file_paths: list[str], config_path: str) -> None:
+    """Send one or more files to the active Feishu chat."""
+    import os
+    from pathlib import Path
+
+    # 1. Load config
+    if not os.path.exists(config_path):
+        print(f"Error: config file not found: {config_path}")
+        return
+    from cc_feishu_bridge.config import load_config
+    config = load_config(config_path)
+
+    # 2. Locate sessions.db (same directory as config)
+    data_dir = str(Path(config_path).parent.resolve())
+    db_path = os.path.join(data_dir, "sessions.db")
+    if not os.path.exists(db_path):
+        print("Error: sessions.db not found. Has the bridge ever been run?")
+        return
+
+    # 3. Find the most recently active session's chat_id
+    from cc_feishu_bridge.claude.session_manager import SessionManager
+    sm = SessionManager(db_path=db_path)
+    session = sm.get_active_session_by_chat_id()
+    if not session or not session.chat_id:
+        print("Error: no active chat session found. Make sure the bridge has been used.")
+        return
+    chat_id = session.chat_id
+    print(f"Sending to chat: {chat_id}")
+
+    # 4. Create FeishuClient
+    from cc_feishu_bridge.feishu.client import FeishuClient
+    feishu = FeishuClient(
+        app_id=config.feishu.app_id,
+        app_secret=config.feishu.app_secret,
+    )
+
+    # 5. Process each file
+    import asyncio
+    try:
+        from cc_feishu_bridge.feishu.media import guess_file_type
+    except ImportError:
+        guess_file_type = None
+
+    async def send_one(file_path: str) -> None:
+        if not os.path.exists(file_path):
+            print(f"Error: file not found: {file_path}")
+            return
+        size = os.path.getsize(file_path)
+        if size > MAX_FILE_SIZE:
+            print(f"Error: {file_path} exceeds 30MB limit")
+            return
+
+        with open(file_path, "rb") as f:
+            data = f.read()
+
+        ext = os.path.splitext(file_path)[1].lower()
+        file_name = os.path.basename(file_path)
+
+        if ext in SUPPORTED_IMAGE_EXTS:
+            image_key = await feishu.upload_image(data)
+            msg_id = await feishu.send_image(chat_id, image_key)
+            print(f"Sent image: {file_name} → {msg_id}")
+        else:
+            if guess_file_type is not None:
+                file_type = guess_file_type(ext)
+            else:
+                file_type = None
+            file_key = await feishu.upload_file(data, file_name, file_type)
+            msg_id = await feishu.send_file(chat_id, file_key, file_name)
+            print(f"Sent file: {file_name} → {msg_id}")
+
+    async def main_async():
+        for fp in file_paths:
+            await send_one(fp)
+
+    asyncio.run(main_async())
+
+
 def main(args=None):
     parser = argparse.ArgumentParser(
         description="Claude Code Feishu Bridge — data stored in .cc-feishu-bridge/"
@@ -232,6 +314,11 @@ def main(args=None):
     stop_parser = subparsers.add_parser("stop", help="Stop a running instance")
     stop_parser.add_argument("pid", type=int, help="PID of the instance to stop")
 
+    # send
+    send_parser = subparsers.add_parser("send", help="Send a file or image to the active Feishu chat")
+    send_parser.add_argument("files", nargs="+", help="Path(s) to the file(s) to send")
+    send_parser.add_argument("--config", required=True, help="Path to config.yaml for this bridge instance")
+
     args = parser.parse_args(args)
 
     logging.basicConfig(
@@ -252,6 +339,11 @@ def main(args=None):
 
     if command == "stop":
         stop_bridge(args.pid)
+        return
+
+    if command == "send":
+        from cc_feishu_bridge.main import run_send_command
+        run_send_command(args.files, args.config)
         return
 
     # Default: start
