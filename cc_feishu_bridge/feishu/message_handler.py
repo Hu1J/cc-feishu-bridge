@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -154,9 +155,11 @@ class MessageHandler:
                 break
             except RuntimeError as e:
                 # Queue bound to a different event loop (e.g., after test teardown) — exit silently.
-                if "different event loop" in str(e) or "Event loop is closed" in str(e):
+                # Only swallow the specific queue/loop errors; re-raise everything else.
+                err_msg = str(e)
+                if "different event loop" in err_msg or "Event loop is closed" in err_msg:
                     break
-                logger.exception("Worker loop error")
+                raise  # re-raise unknown RuntimeError
             except Exception:
                 logger.exception("Worker loop error")
 
@@ -283,7 +286,13 @@ class MessageHandler:
                         else:
                             quoted_content = f"[引用消息: {message.parent_id}] {quoted_text}"
                         logger.info(f"Quoted message {message.parent_id}: {quoted_text[:100]!r}")
+                    else:
+                        # get_message returned None — message not found/deleted
+                        quoted_content = f"[引用消息不可用: {message.parent_id}]"
+                        logger.warning(f"Quoted message {message.parent_id} not found")
                 except Exception:
+                    # Network/auth error — tell the user so they're not confused
+                    quoted_content = f"[引用消息不可用: {message.parent_id}]"
                     logger.warning(f"Failed to fetch quoted message {message.parent_id}")
 
             # Accumulator sends text chunks to Feishu in real-time (with buffering).
@@ -373,7 +382,6 @@ class MessageHandler:
         msg_type = message.get("msg_type", "")
         content_str = message.get("content", "{}")
         try:
-            import json
             content = json.loads(content_str)
             if msg_type == "text":
                 return content.get("text", "")
@@ -402,7 +410,6 @@ class MessageHandler:
         content_str = message.content
 
         try:
-            import json
             content = json.loads(content_str)
         except Exception:
             return ""
