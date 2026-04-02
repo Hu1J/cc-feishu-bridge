@@ -70,12 +70,10 @@ class ClaudeIntegration:
                 cli_path=self.cli_path,
                 include_partial_messages=True,
                 permission_mode="bypassPermissions",
+                continue_conversation=bool(session_id),
             )
 
             client = ClaudeSDKClient(options=options)
-
-            if session_id:
-                options.continue_conversation = True
 
             result_text = ""
             result_session_id = session_id
