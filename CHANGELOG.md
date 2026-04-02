@@ -15,6 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 -->
 
 <!-- Add new changes here before each release. Move to a version section below when tagging. -->
+
+## [0.1.2] - 2026-04-02
+
+### Added
 - **全局消息队列**：所有用户消息统一进入 FIFO 队列，由单一 Worker 串行处理，支持多用户并发和同一用户连续消息有序执行
 - **回复链（Threaded Reply）**：Claude 的所有回复均以飞书引用回复（Reply API）的形式发送，对话结构清晰
 - **引用消息感知**：用户引用某条消息发送时，Claude 自动获取被引用内容并注入 prompt，格式为 `[引用消息: id] 发送者: 内容`；若引用消息不可用则降级显示 `[引用消息不可用: id]`
@@ -24,6 +28,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **多文件并发发送**：`cc-feishu-bridge send` 支持一次传入多个文件，所有文件并发上传、并发发送，显著提升批量发送速度（图片、文件可混合）
 - **Stream 实时推送**：Claude 生成回复时，文字片段实时推送到飞书（带缓冲，工具调用时 flush），避免碎片刷屏；如果流式过程中已发送过文字，则跳过最终完整回复，避免重复
 - **工具图标**：未知工具的兜底图标从 🔧 改为 🤖
+- **图片 prompt 格式修复**：接收图片时使用 `![image](path)` markdown 格式，确保 Claude Code CLI 的 `detectAndLoadPromptImages` 正确识别并描述图片
+- **单实例锁**：使用 `filelock` 确保同一机器同时只有一个 bridge 进程运行，避免重复连接飞书 WS
+
+### Fixed
+- 修复富文本消息（Rich Post）中图片 key 的提取
+- 修复 WS 事件中图片消息 content 缺少 `image_key` 的问题（改用 API 获取）
+- 修复 BytesIO 媒体下载后的读取方式（`response.file.read()`）
+- 降低 WS 解析兜底日志级别（`warning` → `debug`）
 
 ## [0.1.1] - 2026-04-02
 

@@ -78,6 +78,8 @@ def make_file_path(data_dir: str, message_id: str, original_name: str, file_type
     """生成文件本地存储路径。"""
     ts = time.strftime("%Y%m%d_%H%M%S")
     safe_name = sanitize_filename(original_name) if original_name else "file"
+    # If safe_name already has an extension, strip it — we'll add the correct one from file_type
+    safe_name = os.path.splitext(safe_name)[0]
     ext = mime_to_ext(file_type_to_mime(file_type))
     filename = f"file_{ts}_{message_id}_{safe_name}{ext}"
     files_dir = os.path.join(data_dir, "received_files")

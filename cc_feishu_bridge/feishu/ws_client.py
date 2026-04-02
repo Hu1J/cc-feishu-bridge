@@ -13,6 +13,77 @@ from cc_feishu_bridge.feishu.client import IncomingMessage
 
 logger = logging.getLogger(__name__)
 
+
+def _detect_media_type_from_content(parsed: dict) -> str | None:
+    """Detect media type from parsed JSON content.
+
+    Handles four Feishu content formats:
+      1. Simple media: {"image_key": "..."} or {"file_key": "...", "duration": ...}
+      2. Rich post (media+text): {"content": [[{"tag": "img/file/audio", ...}], [{"tag": "text", ...}]]}
+      3. Standalone rich post file: {"content": [[{"tag": "file", "file_key": "..."}]]}
+      4. Simple text: {"text": "..."}
+    """
+    # Format 1: simple {"image_key": ...} or {"file_key": ...}
+    if "image_key" in parsed:
+        return "image"
+    if "file_key" in parsed:
+        if "duration" in parsed:
+            return "audio"
+        return "file"
+
+    # Format 2 & 3: rich post with [[{tag: "img", ...}], [{tag: "text", ...}]]
+    content = parsed.get("content", [])
+    if not isinstance(content, list):
+        return None
+
+    for block in content:
+        if not isinstance(block, list):
+            continue
+        for item in block:
+            if not isinstance(item, dict):
+                continue
+            tag = item.get("tag", "")
+            if tag == "img" and "image_key" in item:
+                return "image"
+            if tag == "audio" and "file_key" in item:
+                return "audio"
+            if tag == "file" and "file_key" in item:
+                return "file"
+
+    return None
+
+
+def _extract_text_from_content(parsed: dict) -> str:
+    """Extract user text from parsed JSON content.
+
+    Handles three Feishu content formats:
+      1. Simple text: {"text": "..."}
+      2. Rich post: {"content": [[{"tag": "img", ...}], [{"tag": "text", "text": "..."}]]}
+      3. Empty / media-only
+    """
+    # Format 1: simple {"text": "..."}
+    if "text" in parsed:
+        return parsed.get("text", "")
+
+    # Format 2: rich post with tag="text" nodes
+    content = parsed.get("content", [])
+    if not isinstance(content, list):
+        return ""
+
+    parts = []
+    for block in content:
+        if not isinstance(block, list):
+            continue
+        for item in block:
+            if not isinstance(item, dict):
+                continue
+            if item.get("tag") == "text":
+                text = item.get("text", "")
+                if text:
+                    parts.append(text)
+
+    return " ".join(parts)
+
 MessageCallback = Callable[[IncomingMessage], Awaitable[None]]
 
 
@@ -58,26 +129,16 @@ class FeishuWSClient:
                 if msg_type == "text":
                     try:
                         parsed = json.loads(content_str)
-                        has_text = "text" in parsed and parsed.get("text")
-                        has_image = "image_key" in parsed
-                        has_audio = "file_key" in parsed and "duration" in parsed
-                        has_file = "file_key" in parsed and not has_audio
-                        # Determine effective message type
-                        if has_image:
-                            msg_type = "image"
-                        elif has_audio:
-                            msg_type = "audio"
-                        elif has_file:
-                            msg_type = "file"
-                        # Preserve text content for mixed messages (image+text, etc.)
-                        if has_text:
-                            content = parsed.get("text", "")
-                        else:
-                            content = ""
+                        # Determine effective message type from rich post or simple media JSON
+                        effective_type = _detect_media_type_from_content(parsed)
+                        if effective_type:
+                            msg_type = effective_type
+                        # Extract text content
+                        content = _extract_text_from_content(parsed)
                     except Exception:
                         pass
 
-                logger.warning(
+                logger.debug(
                     f"Raw message — type={msg_type!r}, content={content_str!r}, "
                     f"message_id={getattr(message, 'message_id', '')!r}"
                 )

@@ -277,9 +277,9 @@ class MessageHandler:
             # Preprocess media (image/file/audio) before querying Claude
             media_prompt_prefix = ""
             media_notify_text = ""
-            logger.warning(f"[_run_query] message_type={message.message_type!r}")
+            logger.debug(f"[_run_query] message_type={message.message_type!r}")
             if message.message_type in ("image", "file", "audio"):
-                logger.warning(f"[_run_query] entering media branch for {message.message_type}")
+                logger.debug(f"[_run_query] entering media branch for {message.message_type}")
                 try:
                     media_prompt_prefix = await self._preprocess_media(message)
                     if media_prompt_prefix:
@@ -431,7 +431,10 @@ class MessageHandler:
         """Download and save inbound media, return the text to prepend to prompt.
 
         Returns:
-            空字符串（无媒体），或形如 "[图片: /path/to/img.png]" 的文本片段。
+            空字符串（无媒体），或形如 "![image](path)" / "[File: path]" 等格式的文本片段。
+            图片用 markdown image 语法以便 SDK 的 detectAndLoadPromptImages 识别；
+            文件/音频用 [File: /path] / [Audio: /path] 格式告知 AI 附件内容，
+            AI 会通过 Read 工具读取本地文件。
         """
         from cc_feishu_bridge.feishu.media import (
             make_image_path,
@@ -443,7 +446,7 @@ class MessageHandler:
             return ""
 
         msg_id = message.message_id
-        logger.warning(f"[media] preprocessing {message.message_type} message {msg_id}")
+        logger.info(f"[media] preprocessing {message.message_type} message {msg_id}")
 
         # Use get_message API to get reliable content (WS event content may be
         # missing image_key for image messages — API always returns it correctly).
@@ -452,7 +455,7 @@ class MessageHandler:
             logger.warning(f"[media] failed to fetch message {msg_id}")
             return ""
         content_str = msg_data.get("content", "{}")
-        logger.warning(f"[media] got content: {content_str[:200]!r}")
+        logger.debug(f"[media] got content: {content_str[:200]!r}")
 
         try:
             content = json.loads(content_str)
@@ -462,18 +465,34 @@ class MessageHandler:
 
         data_dir = self.data_dir or os.getcwd()
 
+        def _find_first_image_key(parsed: dict) -> str | None:
+            """Find first image_key in simple or rich post content format."""
+            # Simple: {"image_key": "..."}
+            if "image_key" in parsed:
+                return parsed.get("image_key")
+            # Rich post: {"content": [[{"tag": "img", "image_key": "..."}]]}
+            for block in parsed.get("content", []):
+                if not isinstance(block, list):
+                    continue
+                for item in block:
+                    if isinstance(item, dict) and item.get("tag") == "img":
+                        return item.get("image_key")
+            return None
+
         if message.message_type == "image":
-            file_key = content.get("image_key", "")
+            file_key = _find_first_image_key(content)
             if not file_key:
                 logger.warning(f"[media] no image_key in message {msg_id}")
                 return ""
-            logger.warning(f"[media] downloading image, key={file_key}")
+            logger.info(f"[media] downloading image, key={file_key}")
             base_path = make_image_path(data_dir, msg_id)
             data = await self.feishu.download_media(msg_id, file_key, msg_type="image")
             save_path = base_path + ".png"
             save_bytes(save_path, data)
-            logger.warning(f"[media] saved image to {save_path}")
-            return f"[图片: {save_path}]"
+            logger.info(f"[media] saved image to {save_path}")
+            # Use standard markdown image syntax so Claude CLI's detectAndLoadPromptImages
+            # recognizes the local path. The SDK scans for "![alt](path)" with an image extension.
+            return f"![image]({save_path})"
 
         elif message.message_type == "file":
             file_key = content.get("file_key", "")
@@ -482,12 +501,14 @@ class MessageHandler:
             if not file_key:
                 logger.warning(f"[media] no file_key in message {msg_id}")
                 return ""
-            logger.warning(f"[media] downloading file {orig_name}, key={file_key}")
+            logger.info(f"[media] downloading file {orig_name}, key={file_key}")
             save_path = make_file_path(data_dir, msg_id, orig_name, file_type)
             data = await self.feishu.download_media(msg_id, file_key, msg_type="file")
             save_bytes(save_path, data)
-            logger.warning(f"[media] saved file to {save_path}")
-            return f"[文件: {save_path}]"
+            logger.info(f"[media] saved file to {save_path}")
+            # [File: /path] 告知 AI 收到了文件，AI 会用 Read 工具读取。
+            # 包含原始文件名方便 AI 判断文件类型和内容。
+            return f"[File: {save_path}] ({orig_name})"
 
         elif message.message_type == "audio":
             try:
@@ -496,7 +517,7 @@ class MessageHandler:
                 if not file_key:
                     logger.warning(f"[media] no file_key in audio message {msg_id}")
                     return ""
-                logger.warning(f"[media] downloading audio, key={file_key}")
+                logger.info(f"[media] downloading audio, key={file_key}")
                 from cc_feishu_bridge.feishu.media import make_audio_path
                 data = await self.feishu.download_media(msg_id, file_key, msg_type="audio")
                 base_path = make_audio_path(data_dir, msg_id)
@@ -504,7 +525,8 @@ class MessageHandler:
                 save_bytes(save_path, data)
                 duration_s = duration_ms / 1000 if duration_ms else None
                 duration_str = f" ({duration_s:.1f}s)" if duration_s else ""
-                logger.warning(f"[media] saved audio to {save_path}")
+                logger.info(f"[media] saved audio to {save_path}")
+                # [Audio: /path] 告知 AI 收到了音频，AI 会用 Read 工具读取。
                 return f"[Audio: {save_path}{duration_str}]"
             except Exception as e:
                 logger.warning(f"Failed to process audio message: {e}")
