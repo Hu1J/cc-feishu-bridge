@@ -98,6 +98,8 @@ class MessageHandler:
         self.formatter = formatter
         self.approved_directory = approved_directory
         self.data_dir = data_dir
+        self._active_task: asyncio.Task | None = None
+        self._active_user_id: str | None = None
 
     async def handle(self, message: IncomingMessage) -> HandlerResult:
         """Main entry point for processing an incoming message."""
@@ -135,85 +137,15 @@ class MessageHandler:
         if session and session.chat_id != message.chat_id:
             self.sessions.update_chat_id(message.user_open_id, message.chat_id)
 
-        # 5. Add typing reaction to user's message (Feishu has no dedicated typing API;
-        # the official plugin uses a 'Typing' emoji reaction instead)
-        reaction_id = await self.feishu.add_typing_reaction(message.message_id)
-
-        # 6. Preprocess media (image/file) before querying Claude
-        media_prompt_prefix = ""
-        if message.message_type in ("image", "file"):
-            try:
-                media_prompt_prefix = await self._preprocess_media(message)
-                if media_prompt_prefix:
-                    logger.info(f"Inbound media saved: {media_prompt_prefix}")
-            except Exception as e:
-                logger.warning(f"Failed to process inbound media: {e}")
-                media_prompt_prefix = ""
-
-        # 7. Call Claude
-        try:
-            # Accumulator sends text chunks to Feishu in real-time (with buffering).
-            # Tool calls flush text immediately, then are sent separately.
-            # After streaming, if text was sent during stream, skip the final response
-            # to avoid duplication — the streamed content is already there.
-            accumulator = StreamAccumulator(message.chat_id, self._safe_send)
-
-            async def stream_callback(claude_msg):
-                if claude_msg.tool_name:
-                    await accumulator.flush()
-                    tool_text = self.formatter.format_tool_call(
-                        claude_msg.tool_name,
-                        claude_msg.tool_input,
-                    )
-                    logger.info(f"[stream] tool: {claude_msg.tool_name}")
-                    await self._safe_send(message.chat_id, tool_text)
-                elif claude_msg.content:
-                    logger.info(f"[stream] text: {claude_msg.content[:100]}")
-                    await accumulator.add_text(claude_msg.content)
-
-            full_prompt = f"{media_prompt_prefix}\n{message.content}".strip() if media_prompt_prefix else message.content
-            response, new_session_id, cost = await self.claude.query(
-                prompt=full_prompt,
-                session_id=sdk_session_id,
-                cwd=session.project_path if session else self.approved_directory,
-                on_stream=stream_callback,
-            )
-
-            # Flush any remaining buffered text
-            await accumulator.flush()
-
-            # 8. Save session
-            if not session:
-                session = self.sessions.create_session(
-                    message.user_open_id,
-                    self.approved_directory,
-                    sdk_session_id=new_session_id,
-                )
-            else:
-                self.sessions.update_session(session.session_id, cost=cost, message_increment=1)
-                # Update SDK session ID if Claude returned a new one
-                if new_session_id:
-                    self.sessions.update_sdk_session_id(session.session_id, new_session_id)
-
-            # 9. Send final text response only if no text was streamed.
-            # If text was streamed in real-time, it is already visible in the chat.
-            if not accumulator.sent_something:
-                formatted = self.formatter.format_text(response)
-                chunks = self.formatter.split_messages(formatted)
-                for chunk in chunks:
-                    await self._safe_send(message.chat_id, chunk)
-
-            logger.info(f"Replied to {message.user_open_id} in chat {message.chat_id} | reply: {response[:300]}")
+        # 5. Re-entrant check: if Claude is already running for this user, ignore
+        if self._active_task is not None and self._active_user_id == message.user_open_id:
+            await self._safe_send(message.chat_id, "⏳ Claude 正在回复中，请稍候...")
             return HandlerResult(success=True)
 
-        except Exception as e:
-            logger.exception(f"Error handling message: {e}")
-            return HandlerResult(success=False, error=str(e))
-
-        finally:
-            # Always remove the typing reaction when done (success or error)
-            if reaction_id:
-                await self.feishu.remove_typing_reaction(message.message_id, reaction_id)
+        # 6. Kick off query as background task and return immediately
+        self._active_task = asyncio.create_task(self._run_query(message, session, sdk_session_id))
+        self._active_user_id = message.user_open_id
+        return HandlerResult(success=True)
 
     async def _handle_command(self, message: IncomingMessage) -> HandlerResult:
         """Handle slash commands like /new, /status."""
@@ -249,11 +181,130 @@ class MessageHandler:
                 ),
             )
 
+        elif cmd == "/stop":
+            return await self._handle_stop(message)
+
+        elif cmd == "/feishu" and arg.startswith("auth"):
+            return await self._handle_feishu_auth(message)
+        elif cmd == "/feishu":
+            return HandlerResult(
+                success=True,
+                response_text=(
+                    "cc-feishu-bridge 命令：\n"
+                    "• /new — 新建会话\n"
+                    "• /status — 会话状态\n"
+                    "• /stop — 打断当前查询\n"
+                    "• /feishu auth — 授权机器人权限（如文件上传）"
+                ),
+            )
+
         else:
             return HandlerResult(
                 success=True,
                 response_text=f"未知命令: {cmd}",
             )
+
+    async def _run_query(
+        self,
+        message: IncomingMessage,
+        session,
+        sdk_session_id: str | None,
+    ) -> None:
+        """Run Claude query in background, send results to Feishu on completion."""
+        reaction_id = None
+        try:
+            # Add typing reaction
+            reaction_id = await self.feishu.add_typing_reaction(message.message_id)
+
+            # Preprocess media (image/file) before querying Claude
+            media_prompt_prefix = ""
+            if message.message_type in ("image", "file"):
+                try:
+                    media_prompt_prefix = await self._preprocess_media(message)
+                    if media_prompt_prefix:
+                        logger.info(f"Inbound media saved: {media_prompt_prefix}")
+                except Exception as e:
+                    logger.warning(f"Failed to process inbound media: {e}")
+                    media_prompt_prefix = ""
+
+            # Accumulator sends text chunks to Feishu in real-time (with buffering).
+            # Tool calls flush text immediately, then are sent separately.
+            # After streaming, if text was sent during stream, skip the final response
+            # to avoid duplication — the streamed content is already there.
+            accumulator = StreamAccumulator(message.chat_id, self._safe_send)
+
+            async def stream_callback(claude_msg):
+                if claude_msg.tool_name:
+                    await accumulator.flush()
+                    tool_text = self.formatter.format_tool_call(
+                        claude_msg.tool_name,
+                        claude_msg.tool_input,
+                    )
+                    logger.info(f"[stream] tool: {claude_msg.tool_name}")
+                    await self._safe_send(message.chat_id, tool_text)
+                elif claude_msg.content:
+                    logger.info(f"[stream] text: {claude_msg.content[:100]}")
+                    await accumulator.add_text(claude_msg.content)
+
+            full_prompt = (
+                f"{media_prompt_prefix}\n{message.content}".strip()
+                if media_prompt_prefix
+                else message.content
+            )
+            response, new_session_id, cost = await self.claude.query(
+                prompt=full_prompt,
+                session_id=sdk_session_id,
+                cwd=session.project_path if session else self.approved_directory,
+                on_stream=stream_callback,
+            )
+
+            # Flush any remaining buffered text
+            await accumulator.flush()
+
+            # Save session
+            if not session:
+                session = self.sessions.create_session(
+                    message.user_open_id,
+                    self.approved_directory,
+                    sdk_session_id=new_session_id,
+                )
+            else:
+                self.sessions.update_session(session.session_id, cost=cost, message_increment=1)
+                # Update SDK session ID if Claude returned a new one
+                if new_session_id:
+                    self.sessions.update_sdk_session_id(session.session_id, new_session_id)
+
+            # Send final text response only if no text was streamed.
+            # If text was streamed in real-time, it is already visible in the chat.
+            if not accumulator.sent_something:
+                formatted = self.formatter.format_text(response)
+                chunks = self.formatter.split_messages(formatted)
+                for chunk in chunks:
+                    await self._safe_send(message.chat_id, chunk)
+
+            logger.info(f"Replied to {message.user_open_id} in chat {message.chat_id} | reply: {response[:300]}")
+
+        except asyncio.CancelledError:
+            await self._safe_send(message.chat_id, "🛑 已打断 Claude。")
+        except Exception as e:
+            logger.exception(f"Error in _run_query: {e}")
+        finally:
+            self._active_task = None
+            self._active_user_id = None
+            if reaction_id:
+                await self.feishu.remove_typing_reaction(message.message_id, reaction_id)
+
+    async def _handle_stop(self, message: IncomingMessage) -> HandlerResult:
+        """Handle /stop — interrupt the running Claude query."""
+        if self._active_task is None:
+            return HandlerResult(success=True, response_text="当前没有正在运行的查询。")
+        interrupted = await self.claude.interrupt_current()
+        if self._active_task is not None:
+            self._active_task.cancel()
+            self._active_task = None
+        self._active_user_id = None
+        await self._safe_send(message.chat_id, "🛑 已发送停止信号，Claude 将中断当前任务。")
+        return HandlerResult(success=True)
 
     async def _safe_send(self, chat_id: str, text: str):
         """Send message, ignoring errors (e.g., rate limits)."""
@@ -311,3 +362,72 @@ class MessageHandler:
             return f"[文件: {save_path}]"
 
         return ""
+
+    async def _handle_feishu_auth(self, message: IncomingMessage) -> HandlerResult:
+        """Send auth card to user and start background polling."""
+        from cc_feishu_bridge.feishu.auth_flow import run_auth_flow
+        from cc_feishu_bridge.feishu.token_store import UserTokenStore
+
+        # Check if already authorized
+        token_store = UserTokenStore(
+            os.path.join(self.data_dir, "user_tokens.yaml")
+        )
+        existing = token_store.load(message.user_open_id)
+        if existing:
+            return HandlerResult(
+                success=True,
+                response_text="✅ 已完成授权，机器人已有上传文件的权限。",
+            )
+
+        # Acknowledge immediately
+        await self._safe_send(
+            message.chat_id,
+            "🔐 正在发起授权，请稍候...",
+        )
+
+        # Start auth flow in background
+        asyncio.create_task(
+            run_auth_flow(
+                app_id=self.feishu.app_id,
+                app_secret=self.feishu.app_secret,
+                user_open_id=message.user_open_id,
+                chat_id=message.chat_id,
+                message_id=message.message_id,
+                send_card_fn=self._send_interactive_card,
+                update_card_fn=self._update_interactive_card,
+                save_token_fn=self._save_user_token,
+                scopes=["im:message", "im:file", "im:resource"],
+            )
+        )
+        return HandlerResult(success=True)
+
+    async def _send_interactive_card(self, chat_id: str, card_json: str, reply_to: str) -> None:
+        """Send an interactive card replying to the user's auth command message."""
+        try:
+            await self.feishu.send_interactive(chat_id, card_json, reply_to_message_id=reply_to)
+        except Exception as e:
+            logger.warning(f"Failed to send auth card: {e}")
+
+    async def _update_interactive_card(self, message_id: str, card_json: str) -> None:
+        """Update an existing interactive message with new card content."""
+        try:
+            await self.feishu.update_message(message_id, card_json)
+        except Exception as e:
+            logger.warning(f"Failed to update card message {message_id}: {e}")
+
+    async def _save_user_token(self, user_open_id: str, token_data: dict) -> None:
+        """Persist user token to disk with expiry time."""
+        import datetime
+        from cc_feishu_bridge.feishu.token_store import UserTokenStore
+        token_store = UserTokenStore(
+            os.path.join(self.data_dir, "user_tokens.yaml")
+        )
+        expires_at = (
+            datetime.datetime.utcnow()
+            + datetime.timedelta(seconds=token_data.get("expires_in", 7200))
+        ).isoformat() + "Z"
+        token_store.save(user_open_id, {
+            "access_token": token_data["access_token"],
+            "refresh_token": token_data.get("refresh_token", ""),
+            "expires_at": expires_at,
+        })

@@ -249,6 +249,47 @@ class FeishuClient:
             logger.error(f"send_file error: {e}")
             raise
 
+    async def send_interactive(self, chat_id: str, card_json: str, reply_to_message_id: str) -> str:
+        """Send an interactive card message, replying to a specific message."""
+        import json
+        import lark_oapi as lark
+        client = self._get_client()
+        request = (
+            lark.im.v1.ReplyMessageRequest.builder()
+            .message_id(reply_to_message_id)
+            .request_body(
+                lark.im.v1.ReplyMessageRequestBody.builder()
+                .content(card_json)
+                .msg_type("interactive")
+                .build()
+            )
+            .build()
+        )
+        response = await asyncio.to_thread(client.im.v1.message.reply, request)
+        if not response.success():
+            raise RuntimeError(f"Failed to send card: {response.msg}")
+        return response.data.message_id
+
+    async def update_message(self, message_id: str, card_json: str) -> None:
+        """Update an existing message's content (used for card status updates)."""
+        import json
+        import lark_oapi as lark
+        client = self._get_client()
+        request = (
+            lark.im.v1.PatchMessageRequest.builder()
+            .message_id(message_id)
+            .request_body(
+                lark.im.v1.PatchMessageRequestBody.builder()
+                .content(card_json)
+                .msg_type("interactive")
+                .build()
+            )
+            .build()
+        )
+        response = await asyncio.to_thread(client.im.v1.message.patch, request)
+        if not response.success():
+            raise RuntimeError(f"Failed to update message: {response.msg}")
+
     def _extract_file_info(self, content_str: str) -> tuple[str, str]:
         """Extract original filename and file_type from file message content."""
         import json
