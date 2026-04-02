@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import shutil
 import signal
 import sys
 from pathlib import Path
@@ -18,6 +19,7 @@ from cc_feishu_bridge.config import load_config, resolve_config_path
 from cc_feishu_bridge.feishu.client import FeishuClient, IncomingMessage
 from cc_feishu_bridge.feishu.ws_client import FeishuWSClient
 from cc_feishu_bridge.feishu.message_handler import MessageHandler
+from cc_feishu_bridge.feishu.error_notifier import setup as setup_error_notifier, update_chat_id as notifier_update_chat_id
 from cc_feishu_bridge.security.auth import Authenticator
 from cc_feishu_bridge.security.validator import SecurityValidator
 from cc_feishu_bridge.claude.integration import ClaudeIntegration
@@ -57,6 +59,7 @@ def create_handler(config, data_dir: str) -> MessageHandler:
         bot_name=config.feishu.bot_name,
         data_dir=data_dir,
     )
+    setup_error_notifier(feishu)
     authenticator = Authenticator(allowed_users=config.auth.allowed_users)
     validator = SecurityValidator(approved_directory=config.claude.approved_directory)
     claude = ClaudeIntegration(
@@ -83,6 +86,8 @@ def create_handler(config, data_dir: str) -> MessageHandler:
 
 async def handle_message(message: IncomingMessage, handler: MessageHandler) -> None:
     """Callback for incoming Feishu messages — dispatch to handler."""
+    # Keep error notifier's chat_id fresh for error reporting
+    notifier_update_chat_id(message.chat_id)
     try:
         await handler.handle(message)
     except Exception as e:
@@ -171,6 +176,47 @@ def confirm_risk_warning(config_path: str) -> bool:
             return False
 
 
+def _claude_available(cli_path: str) -> bool:
+    """Return True if the Claude CLI is found in PATH or at the given path."""
+    if cli_path != "claude":
+        # Explicit path — just check if file exists and is executable
+        return os.path.isfile(cli_path) and os.access(cli_path, os.X_OK)
+    return shutil.which("claude") is not None
+
+
+def _notify_claude_missing(config, data_dir: str, feishu) -> None:
+    """Send a Feishu message about missing Claude Code to the last active chat."""
+    # Try to get the last active chat to notify the user
+    db_path = os.path.join(data_dir, "sessions.db")
+    try:
+        from cc_feishu_bridge.claude.session_manager import SessionManager
+        sm = SessionManager(db_path=db_path)
+        session = sm.get_active_session_by_chat_id()
+        chat_id = session.chat_id if session else None
+    except Exception:
+        chat_id = None
+
+    if not chat_id:
+        logger.warning("Claude Code not found and no active chat to notify — user will see errors in Feishu")
+        return
+
+    notifier_update_chat_id(chat_id)
+
+    msg = (
+        "⚠️ **Claude Code 未安装或不可用**\n\n"
+        "机器人无法连接 Claude，请先安装：\n\n"
+        "```bash\n# macOS / Linux\nnpm install -g @anthropic-ai/claude-code\n\n"
+        "# 验证安装\nclaude --version\n```\n\n"
+        "安装完成后重新发送消息即可。"
+    )
+
+    try:
+        import asyncio
+        asyncio.run(feishu.send_post_reply(chat_id=chat_id, content=msg, log_reply=False))
+    except Exception as e:
+        logger.warning(f"Failed to send Claude-not-found notification: {e}")
+
+
 def start_bridge(config_path: str, data_dir: str) -> None:
     """Start the bridge: load config and run WebSocket connection."""
     # Acquire exclusive lock before starting — prevents multiple instances in the same directory
@@ -210,6 +256,10 @@ def start_bridge(config_path: str, data_dir: str) -> None:
 
     # Auto-install Claude skill for file sending
     ensure_skill_installed()
+
+    # Check if Claude Code CLI is available
+    if not _claude_available(config.claude.cli_path):
+        _notify_claude_missing(config, data_dir, handler._feishu)
 
     # Create media subdirectories
     for sub in ("received_images", "received_files"):

@@ -139,8 +139,9 @@ class FeishuWSClient:
                         pass
 
                 logger.debug(
-                    f"Raw message — type={msg_type!r}, content={content_str!r}, "
-                    f"message_id={getattr(message, 'message_id', '')!r}"
+                    f"Raw message — type={msg_type!r}, message_id={getattr(message, 'message_id', '')!r}, "
+                    f"parent_id={getattr(message, 'parent_id', '')!r}, root_id={getattr(message, 'root_id', '')!r}, "
+                    f"content={content_str!r}"
                 )
 
                 sender_id = getattr(sender, "sender_id", None)
@@ -158,7 +159,7 @@ class FeishuWSClient:
                     parent_id=getattr(message, "parent_id", ""),
                     thread_id=getattr(message, "thread_id", ""),
                 )
-                logger.info(f"Received message from {user_open_id}: type={msg_type!r} content={content!r}")
+                logger.info(f"Received message from {user_open_id}: type={msg_type!r} parent_id={getattr(message, 'parent_id', '')!r} content={content!r}")
                 try:
                     loop = asyncio.get_running_loop()
                 except RuntimeError:
