@@ -67,6 +67,40 @@ async def handle_message(message: IncomingMessage, handler: MessageHandler) -> N
         logger.exception(f"Error handling message: {e}")
 
 
+SKILL_NAME = "cc-feishu-send-file"
+SKILL_VERSION = "1.0.0"
+
+
+def ensure_skill_installed() -> None:
+    """Install or update the cc-feishu-send-file skill to ~/.claude/skills/.
+
+    Idempotent: skips if version matches, updates if version differs.
+    """
+    import os
+    import shutil
+
+    skill_src = os.path.join(os.path.dirname(__file__), "..", "..", "skills", SKILL_NAME, "skill.md")
+    skill_src = os.path.normpath(skill_src)
+
+    dest_dir = os.path.expanduser(f"~/.claude/skills/{SKILL_NAME}")
+    dest_path = os.path.join(dest_dir, "skill.md")
+    version_marker = os.path.join(dest_dir, ".version")
+
+    if os.path.exists(dest_path):
+        current_version = ""
+        if os.path.exists(version_marker):
+            current_version = open(version_marker).read().strip()
+        if current_version == SKILL_VERSION:
+            logger.info(f"Skill {SKILL_NAME} v{SKILL_VERSION} already installed, skipping.")
+            return
+
+    # Install or update
+    os.makedirs(dest_dir, exist_ok=True)
+    shutil.copy2(skill_src, dest_path)
+    open(version_marker, "w").write(SKILL_VERSION)
+    logger.info(f"Installed skill {SKILL_NAME} v{SKILL_VERSION} to {dest_dir}")
+
+
 def write_pid(pid_file: str) -> None:
     """Write current PID to file."""
     Path(pid_file).write_text(str(os.getpid()))
@@ -144,6 +178,9 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     signal.signal(signal.SIGTERM, cleanup)
 
     logger.info(f"Starting Feishu bridge (WS mode) — data: {data_dir}")
+
+    # Auto-install Claude skill for file sending
+    ensure_skill_installed()
 
     # Create media subdirectories
     for sub in ("received_images", "received_files"):
