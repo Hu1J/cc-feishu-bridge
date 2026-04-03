@@ -347,10 +347,7 @@ class MessageHandler:
                         claude_msg.tool_name,
                         claude_msg.tool_input,
                     )
-                    tool_input_display = (claude_msg.tool_input or "")[:200]
-                    if len(claude_msg.tool_input or "") > 200:
-                        tool_input_display += "..."
-                    logger.info(f"[stream] tool: {claude_msg.tool_name} | input: {tool_input_display}")
+                    logger.info(f"[stream] tool: {claude_msg.tool_name} | input: {claude_msg.tool_input}")
                     await self._safe_send(message.chat_id, message.message_id, tool_text, log_reply=False)
                 elif claude_msg.content:
                     logger.info(f"[stream] text: {claude_msg.content[:100]}")
