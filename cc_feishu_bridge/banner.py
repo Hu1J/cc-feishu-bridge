@@ -11,15 +11,7 @@ PURPLE = "\033[35m"
 WHITE = "\033[37m"
 RESET = "\033[0m"
 
-TERMINAL_ART = """
-{BLUE}  ████▀▀▀███▄▄▄▄▄     ▄▄▄██▀▀▀▀▀▀██▄▄▄
-  ██▀▀▀▀▀▀▀▀▀▀▀██       ██▀▀▀▀▀▀▀▀▀▀▀██
-  ██  ████████  ██  ██  ██  █████████  ██
-  ▀▀▀██▄▄▄▄▄▄▄▄██▀▀▀  ▀▀▀██▄▄▄▄▄▄▄▄▄██▀▀▀
-  ██▄▄▄▄▄▄▄▄▄▄██       ██▄▄▄▄▄▄▄▄▄▄▄██
-  ▀▀▀████████▀▀▀         ▀▀▀████████▀▀▀
-{RESET}
-  {PURPLE}cc-feishu-bridge  {WHITE}v{version}{RESET}
+TERMINAL_ART = """  {WHITE}cc-feishu-bridge  v{version}{RESET}
 """
 
 
