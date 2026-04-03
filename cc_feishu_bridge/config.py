@@ -42,7 +42,7 @@ class ServerConfig:
 
 @dataclass
 class ProactiveConfig:
-    enabled: bool = False
+    enabled: bool = True
     time_window_start: str = "08:00"   # HH:MM 格式
     time_window_end: str = "22:00"      # HH:MM 格式
     silence_threshold_minutes: int = 60
@@ -62,8 +62,28 @@ class Config:
     bypass_accepted: bool = False
 
 
+def _upgrade_config(path: str) -> None:
+    """Auto-upgrade config.yaml if proactive section is missing."""
+    with open(path) as f:
+        raw = yaml.safe_load(f)
+    if "proactive" in raw:
+        return
+    default_proactive = {
+        "enabled": True,
+        "time_window_start": "08:00",
+        "time_window_end": "22:00",
+        "silence_threshold_minutes": 60,
+        "check_interval_minutes": 5,
+        "max_per_day": 3,
+    }
+    raw["proactive"] = default_proactive
+    with open(path, "w") as f:
+        yaml.dump(raw, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+
 def load_config(path: str, data_dir: str = "") -> Config:
     """Load and validate configuration from YAML file."""
+    _upgrade_config(path)
     with open(path) as f:
         raw = yaml.safe_load(f)
 
@@ -111,6 +131,14 @@ def save_config(path: str, feishu_app_id: str, feishu_app_secret: str,
             "host": server_host,
             "port": server_port,
             "webhook_path": server_webhook_path,
+        },
+        "proactive": {
+            "enabled": True,
+            "time_window_start": "08:00",
+            "time_window_end": "22:00",
+            "silence_threshold_minutes": 60,
+            "check_interval_minutes": 5,
+            "max_per_day": 3,
         },
         "bypass_accepted": bypass_accepted,
     }
