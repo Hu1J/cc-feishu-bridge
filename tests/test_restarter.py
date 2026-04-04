@@ -96,8 +96,9 @@ class TestStepLabels:
 
     def test_feishu_step_labels_have_emoji(self):
         """_FEISHU_STEP_LABELS contains emoji."""
-        for label in _FEISHU_STEP_LABELS:
-            assert any(c in label for c in ["🛑", "🚀", "⏳", "✅"])
+        expected_emoji_per_step = ["🛑", "🚀", "⏳", "✅"]
+        for i, label in enumerate(_FEISHU_STEP_LABELS):
+            assert expected_emoji_per_step[i] in label, f"Step {i+1} label missing expected emoji {expected_emoji_per_step[i]}"
 
 
 class TestExceptions:
