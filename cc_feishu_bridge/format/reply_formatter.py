@@ -190,6 +190,10 @@ class ReplyFormatter:
                 except (json.JSONDecodeError, KeyError):
                     pass  # 降级到 backtick 格式
 
+        # Bash → md 代码段，description 转注释
+        elif tool_name == "Bash":
+            return self._format_bash_tool(tool_input)
+
         # 其他工具 → backtick 格式（原有逻辑）
         icon = self.tool_icons.get(tool_name, "🤖")
         msg = f"{icon} **{tool_name}**"
@@ -201,6 +205,30 @@ class ReplyFormatter:
                 for chunk in chunks:
                     msg += f"\n`{chunk}`"
         return msg
+
+    def _format_bash_tool(self, tool_input: str) -> str:
+        """Format Bash tool call as a markdown code block with description as comment."""
+        try:
+            data = json.loads(tool_input)
+        except json.JSONDecodeError:
+            # 不是合法 JSON，降级
+            return f"💻 **Bash**\n```bash\n{tool_input}\n```"
+
+        command = data.get("command", tool_input)
+        description = data.get("description")
+
+        icon = self.tool_icons.get("Bash", "💻")
+        header = f"{icon} **Bash**"
+
+        lines = []
+        if description:
+            # description 可能有多行，每行都加 # 注释
+            for desc_line in description.splitlines():
+                lines.append(f"# {desc_line}")
+        lines.append(command)
+
+        body = "\n".join(lines)
+        return f"{header}\n```bash\n{body}\n```"
 
     def should_use_card(self, text: str) -> bool:
         """Decide whether to send as Feishu Interactive Card vs post.

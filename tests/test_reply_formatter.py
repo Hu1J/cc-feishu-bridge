@@ -40,3 +40,31 @@ def test_split_messages_long(formatter):
     assert len(chunks) > 1
     for chunk in chunks:
         assert len(chunk) <= FEISHU_MAX_MESSAGE_LENGTH
+
+
+def test_format_bash_with_description(formatter):
+    import json
+    tool_input = json.dumps({"command": "ls -la", "description": "List all files"})
+    result = formatter.format_tool_call("Bash", tool_input)
+    assert result == "💻 **Bash**\n```bash\n# List all files\nls -la\n```"
+
+
+def test_format_bash_without_description(formatter):
+    import json
+    tool_input = json.dumps({"command": "git status"})
+    result = formatter.format_tool_call("Bash", tool_input)
+    assert result == "💻 **Bash**\n```bash\ngit status\n```"
+
+
+def test_format_bash_invalid_json(formatter):
+    result = formatter.format_tool_call("Bash", "ls -la")
+    assert "💻 **Bash**" in result
+    assert "ls -la" in result
+
+
+def test_format_bash_multiline_description(formatter):
+    import json
+    tool_input = json.dumps({"command": "pytest", "description": "Run tests\nVerbose output"})
+    result = formatter.format_tool_call("Bash", tool_input)
+    assert "# Run tests" in result
+    assert "# Verbose output" in result
