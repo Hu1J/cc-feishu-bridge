@@ -167,7 +167,7 @@ class ReplyFormatter:
         text = optimize_markdown_style(text, card_version=2)
         return text.strip()
 
-    def format_tool_call(self, tool_name: str, tool_input: str | None = None) -> str | _DiffMarker:
+    def format_tool_call(self, tool_name: str, tool_input: str | None = None) -> str | _DiffMarker | list[_DiffMarker]:
         """Format a tool call notification for the user.
 
         Returns _DiffMarker for Edit/Write tools (to trigger colored card rendering),

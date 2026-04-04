@@ -66,10 +66,21 @@ class TestFormatCard:
         card = format_edit_card("/tmp/test.txt", diff)
         assert card["schema"] == "2.0"
         assert "body" in card
-        # header element
         elements = card["body"]["elements"]
-        assert elements[0]["tag"] == "div"
-        assert elements[0]["text"]["tag"] == "plain_text"
+        assert elements[0]["tag"] == "markdown"
+        assert "background_color" in elements[1]
+
+    def test_edit_card_annotated_text_coloring(self):
+        diff = colorize_diff("foo", "bar")
+        card = format_edit_card("/tmp/test.txt", diff)
+        diff_element = card["body"]["elements"][1]["fields"][0]["text"]
+        assert diff_element["tag"] == "annotated_text"
+        # First segment is deletion (- foo), second is insertion (+ bar)
+        assert len(diff_element["elements"]) == 2
+        assert diff_element["elements"][0]["content"] == "- foo"
+        assert diff_element["elements"][0]["color"] == "red"
+        assert diff_element["elements"][1]["content"] == "+ bar"
+        assert diff_element["elements"][1]["color"] == "green"
 
     def test_write_card_structure(self):
         card = format_write_card("/tmp/test.txt", ["line1", "line2"])
@@ -94,6 +105,8 @@ class TestBuildMarker:
     def test_write_marker(self):
         import json
         inp = json.dumps({"file_path": "/tmp/a.txt", "content": "hello\nworld"})
-        marker = build_write_marker(inp)
+        result = build_write_marker(inp)
+        assert isinstance(result, list)
+        marker = result[0]
         assert isinstance(marker, _DiffMarker)
         assert marker.tool_name == "Write"

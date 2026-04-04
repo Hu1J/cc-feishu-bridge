@@ -11,4 +11,6 @@ build/
 docs/
 .venv/
 .cc-feishu-bridge/
+.superpowers/
 .DS_Store
+.gstack/
