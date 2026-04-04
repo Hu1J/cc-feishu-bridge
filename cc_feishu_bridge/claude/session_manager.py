@@ -86,6 +86,26 @@ class SessionManager:
                 CREATE INDEX IF NOT EXISTS idx_user_last
                 ON sessions(user_id, last_used DESC)
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message_id TEXT NOT NULL UNIQUE,
+                    session_id TEXT NOT NULL,
+                    chat_id TEXT NOT NULL,
+                    user_open_id TEXT NOT NULL,
+                    message_type TEXT NOT NULL,
+                    raw_content TEXT NOT NULL,
+                    content TEXT,
+                    created_at TIMESTAMP NOT NULL,
+                    direction TEXT NOT NULL DEFAULT 'incoming'
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at)"
+            )
 
     def create_session(self, user_id: str, project_path: str, sdk_session_id: str | None = None) -> Session:
         """Create a new session for a user."""
@@ -280,4 +300,27 @@ class SessionManager:
             conn.execute(
                 """UPDATE sessions SET last_proactive_at = ? WHERE session_id = ?""",
                 (datetime.utcnow().isoformat(), session_id),
+            )
+
+    def store_message(
+        self,
+        message_id: str,
+        session_id: str,
+        chat_id: str,
+        user_open_id: str,
+        message_type: str,
+        raw_content: str,
+        content: str | None = None,
+        direction: str = "incoming",
+    ) -> None:
+        """Store an incoming or outgoing message for memory enhancement."""
+        now = datetime.utcnow().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """INSERT OR IGNORE INTO messages
+                   (message_id, session_id, chat_id, user_open_id, message_type,
+                    raw_content, content, created_at, direction)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (message_id, session_id, chat_id, user_open_id, message_type,
+                 raw_content, content, now, direction),
             )

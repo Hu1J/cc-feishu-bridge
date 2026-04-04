@@ -106,11 +106,22 @@ async def handle_message(message: IncomingMessage, handler: MessageHandler) -> N
     """Callback for incoming Feishu messages — dispatch to handler."""
     # Keep error notifier's chat_id fresh for error reporting
     notifier_update_chat_id(message.chat_id)
-    # Update last message time for proactive tracking
+    # Store raw message for memory enhancement
+    session = None
     if message.user_open_id:
         session = handler.sessions.get_active_session(message.user_open_id)
         if session:
             handler.sessions.update_session(session.session_id, update_last_message=True)
+            handler.sessions.store_message(
+                message_id=message.message_id,
+                session_id=session.session_id,
+                chat_id=message.chat_id,
+                user_open_id=message.user_open_id,
+                message_type=message.message_type,
+                raw_content=message.raw_content,
+                content=message.content,
+                direction="incoming",
+            )
     try:
         await handler.handle(message)
     except Exception as e:

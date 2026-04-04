@@ -158,6 +158,7 @@ class FeishuWSClient:
                     create_time=getattr(message, "create_time", ""),
                     parent_id=getattr(message, "parent_id", ""),
                     thread_id=getattr(message, "thread_id", ""),
+                    raw_content=content_str,
                 )
                 logger.info(f"Received message from {user_open_id}: type={msg_type!r} parent_id={getattr(message, 'parent_id', '')!r} raw_content={content_str!r}")
                 try:

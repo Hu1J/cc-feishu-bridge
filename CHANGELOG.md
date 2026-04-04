@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.4] - 2026-04-04
+
+### Added
+- **消息存储**：所有收到的用户消息自动写入 `messages` 表（原始 JSON + 处理后文本），为未来记忆增强打下基础
+
 ## [0.2.3] - 2026-04-04
 
 ### Changed

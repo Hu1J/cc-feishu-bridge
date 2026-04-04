@@ -101,11 +101,12 @@ class IncomingMessage:
     message_id: str
     chat_id: str
     user_open_id: str
-    content: str           # text content
+    content: str           # processed text content
     message_type: str      # "text", "image", "file", "audio", etc.
     create_time: str
     parent_id: str = ""    # 被引用消息的 ID（用户引用/回复某条消息时）
     thread_id: str = ""    # 所在线程的 ID
+    raw_content: str = ""  # 原始 JSON 字符串（用于调试和记忆增强）
 
 
 class FeishuClient:
