@@ -133,6 +133,9 @@ def _copy_and_fix_config(current_path: str, target_path: str) -> None:
     current_config_path = _config_file_path(current_path)
     target_config_path = _target_config_file_path(target_path)
 
+    if not os.path.exists(current_config_path):
+        raise SwitchError("当前项目未初始化（无 config.yaml）")
+
     with open(current_config_path) as f:
         raw = yaml.safe_load(f)
 
@@ -165,11 +168,14 @@ def _start_bridge(target_path: str, timeout: float = 8.0) -> int:
     # Start bridge using main.py's start command
     # We use sys.executable to ensure we use the same Python interpreter
     import sys
+    target_cc = os.path.join(target_path, ".cc-feishu-bridge")
+    stdout_log = open(os.path.join(target_cc, "bridge-stdout.log"), "w")
+    stderr_log = open(os.path.join(target_cc, "bridge-stderr.log"), "w")
     proc = subprocess.Popen(
-        [sys.executable, "-m", "cc_feishu_bridge", "start"],
+        [sys.executable, "-m", "cc_feishu_bridge.main"],
         cwd=target_path,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=stdout_log,
+        stderr=stderr_log,
         start_new_session=True,
     )
 
