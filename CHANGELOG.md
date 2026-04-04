@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.0] - 2026-04-04
+
+### Added
+- **Edit/Write 彩色 Diff 卡片**：使用 LCS 算法计算行级 diff，通过飞书 `lark_md` + `<font color>` 标签实现红色（删除）、绿色（新增）、灰色（上下文）着色，每行附带行号
+- **Bash 工具格式化**：解析 `command` 和 `description` 字段，description 显示在标题行，命令以 ` ```bash ` 代码段呈现
+- **Read 工具格式化**：提取 `file_path`，以换行 + backtick 包裹路径的形式展示
+- **卡片发送失败降级**：当 Edit/Write 卡片发送失败时，自动降级为带图标的纯文本提示，确保用户始终收到通知
+- **错误通知**：内部异常时主动向用户发送错误提示，而非静默丢弃
+
+### Changed
+- **工具调用通知样式全面升级**：Read / Bash / Edit / Write 告别纯 backtick 格式，改为语义化展示
+
 ## [0.2.0] - 2026-04-04
 
 ### Added
