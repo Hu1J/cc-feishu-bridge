@@ -108,9 +108,7 @@ def test_get_message_success():
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
         with patch('asyncio.to_thread', return_value=mock_response):
-            result = asyncio.get_event_loop().run_until_complete(
-                client.get_message("om_123")
-            )
+            result = asyncio.run(client.get_message("om_123"))
     assert result is not None
     assert result["msg_type"] == "text"
     assert result["content"] == '{"text":"hello"}'
@@ -127,9 +125,7 @@ def test_get_message_failure_returns_none():
     with patch.object(client, '_get_client') as mock_get_client:
         mock_get_client.return_value = MagicMock()
         with patch('asyncio.to_thread', return_value=mock_response):
-            result = asyncio.get_event_loop().run_until_complete(
-                client.get_message("om_bad")
-            )
+            result = asyncio.run(client.get_message("om_bad"))
     assert result is None
 
 
@@ -143,7 +139,5 @@ def test_send_text_reply():
     with patch.object(client, '_get_client') as mock_get_client:
         mock_get_client.return_value = MagicMock()
         with patch('asyncio.to_thread', return_value=mock_response):
-            result = asyncio.get_event_loop().run_until_complete(
-                client.send_text_reply("chat_abc", "hello", "om_original")
-            )
+            result = asyncio.run(client.send_text_reply("chat_abc", "hello", "om_original"))
     assert result == "om_reply_123"
