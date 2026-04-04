@@ -109,6 +109,12 @@ def test_stream_accumulator_sends_with_message_id():
     assert sent_args == [("chat_abc", "om_reply_to", "hello")]
 
 
+def test_git_command_recognized():
+    """验证 /git 被识别为命令（不触发 Claude）。"""
+    from cc_feishu_bridge.feishu.message_handler import _is_command
+    assert _is_command("/git") == True
+
+
 def test_stop_cancels_worker():
     """Sending /stop should cancel the running worker."""
     handler = _make_handler()
