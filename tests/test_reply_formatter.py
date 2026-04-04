@@ -68,3 +68,17 @@ def test_format_bash_multiline_description(formatter):
     result = formatter.format_tool_call("Bash", tool_input)
     assert "# Run tests" in result
     assert "# Verbose output" in result
+
+
+def test_format_read_tool(formatter):
+    import json
+    tool_input = json.dumps({"file_path": "src/main.py"})
+    result = formatter.format_tool_call("Read", tool_input)
+    assert result == "📖 **Read**\n```\nsrc/main.py\n```"
+
+
+def test_format_read_tool_string_input(formatter):
+    # 非 JSON 字符串输入（fallback）
+    result = formatter.format_tool_call("Read", "src/main.py")
+    assert "📖 **Read**" in result
+    assert "src/main.py" in result

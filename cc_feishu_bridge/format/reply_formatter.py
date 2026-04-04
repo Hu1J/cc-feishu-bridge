@@ -194,6 +194,10 @@ class ReplyFormatter:
         elif tool_name == "Bash":
             return self._format_bash_tool(tool_input)
 
+        # Read → md 代码段，提取 file_path
+        elif tool_name == "Read":
+            return self._format_read_tool(tool_input)
+
         # 其他工具 → backtick 格式（原有逻辑）
         icon = self.tool_icons.get(tool_name, "🤖")
         msg = f"{icon} **{tool_name}**"
@@ -229,6 +233,17 @@ class ReplyFormatter:
 
         body = "\n".join(lines)
         return f"{header}\n```bash\n{body}\n```"
+
+    def _format_read_tool(self, tool_input: str) -> str:
+        """Format Read tool call as a markdown code block showing the file path."""
+        try:
+            data = json.loads(tool_input)
+            file_path = data.get("file_path", tool_input)
+        except json.JSONDecodeError:
+            file_path = tool_input
+
+        icon = self.tool_icons.get("Read", "📖")
+        return f"{icon} **Read**\n```\n{file_path}\n```"
 
     def should_use_card(self, text: str) -> bool:
         """Decide whether to send as Feishu Interactive Card vs post.
