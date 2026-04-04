@@ -256,6 +256,9 @@ class ReplyFormatter:
         except json.JSONDecodeError:
             todos = []
 
+        if not isinstance(todos, list):
+            todos = []
+
         if not todos:
             return "✅ 所有任务已完成！"
 
@@ -263,8 +266,8 @@ class ReplyFormatter:
         rows = ["| 状态 | 待办事项 | 当前动作 |", "|------|----------|----------|"]
         for t in todos:
             icon = status_icon.get(t.get("status", "pending"), "⬜")
-            content = t.get("content", "")
-            active = t.get("activeForm", "")
+            content = str(t.get("content", "")).replace("\n", " ").replace("|", "\\|")
+            active = str(t.get("activeForm", "")).replace("\n", " ").replace("|", "\\|")
             rows.append(f"| {icon} | {content} | {active} |")
 
         return "📋 Todo List\n\n" + "\n".join(rows)

@@ -111,3 +111,26 @@ def test_format_todowrite_empty(formatter):
 def test_format_todowrite_invalid_json(formatter):
     result = formatter.format_tool_call("TodoWrite", "not json")
     assert result == "✅ 所有任务已完成！"
+
+
+def test_format_todowrite_injection_safety(formatter):
+    """Pipe and newline in content must be escaped to not break table."""
+    import json
+    tool_input = json.dumps({
+        "todos": [
+            {"content": "Task with | pipe\nnewline", "status": "pending", "activeForm": "Do|ing stuff"},
+        ]
+    })
+    result = formatter.format_tool_call("TodoWrite", tool_input)
+    # Pipe must be escaped so it renders literally, not as table cell
+    assert r"\|" in result
+    # No raw pipe in content (must be escaped)
+    assert "| pipe\n" not in result
+
+
+def test_format_todowrite_non_list_todos(formatter):
+    """todos field is not a list — should gracefully treat as empty."""
+    import json
+    tool_input = json.dumps({"todos": "not a list"})
+    result = formatter.format_tool_call("TodoWrite", tool_input)
+    assert result == "✅ 所有任务已完成！"
