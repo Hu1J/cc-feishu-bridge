@@ -104,7 +104,7 @@ class TestSwitchTo:
         }))
 
         with patch("cc_feishu_bridge.switcher._start_bridge") as mock_start, \
-             patch("cc_feishu_bridge.switcher._stop_bridge"), \
+             patch("cc_feishu_bridge.switcher._stop_bridge", return_value=True), \
              patch("cc_feishu_bridge.switcher.os.getcwd", return_value=str(current)):
             result = switch_to(str(target))
 
@@ -117,8 +117,8 @@ class TestSwitchTo:
         expected_db = str(target_cc / "sessions.db")
         assert written["storage"]["db_path"] == expected_db
 
-    def test_feishu_creds_preserved(self, tmp_path):
-        """app_id/app_secret are copied unchanged to target."""
+    def test_current_creds_written_to_target(self, tmp_path):
+        """Current app_id/app_secret are written to target (overwriting target's creds)."""
         current = tmp_path / "current"
         target = tmp_path / "target"
         current.mkdir()
@@ -142,7 +142,7 @@ class TestSwitchTo:
         }))
 
         with patch("cc_feishu_bridge.switcher._start_bridge") as mock_start, \
-             patch("cc_feishu_bridge.switcher._stop_bridge"), \
+             patch("cc_feishu_bridge.switcher._stop_bridge", return_value=True), \
              patch("cc_feishu_bridge.switcher.os.getcwd", return_value=str(current)):
             result = switch_to(str(target))
 

@@ -78,24 +78,26 @@ def _kill_process(pid: int, sig: int, timeout: float) -> bool:
     return False
 
 
-def _stop_bridge(project_path: str) -> None:
-    """Stop the bridge for a project. Uses SIGTERM then SIGKILL."""
+def _stop_bridge(project_path: str) -> bool:
+    """Stop the bridge for a project. Uses SIGTERM then SIGKILL. Returns True if stopped, False if failed."""
     pid_file = _pid_file_path(project_path)
     pid = _read_pid(pid_file)
 
     if pid is None:
-        return  # Already stopped
+        return True  # Already stopped
 
     # SIGTERM first
     if not _kill_process(pid, signal.SIGTERM, timeout=5.0):
         # SIGKILL if still alive
-        _kill_process(pid, signal.SIGKILL, timeout=2.0)
+        if not _kill_process(pid, signal.SIGKILL, timeout=2.0):
+            return False
 
     # Clean up pid file
     try:
         Path(pid_file).unlink(missing_ok=True)
     except OSError:
         pass
+    return True
 
 
 def _check_target_initialized(target_path: str) -> None:
@@ -215,15 +217,8 @@ def switch_to(target_path: str) -> SwitchResult:
         )
 
     # Step 2: Stop target bridge if running
-    try:
-        _stop_bridge(target_path)
-    except Exception as e:
-        return SwitchResult(
-            success=False,
-            target_path=target_path,
-            error_step="stop_target",
-            error_message=f"Failed to stop target bridge: {e}",
-        )
+    if not _stop_bridge(target_path):
+        raise TargetStopError(f"Failed to stop target bridge")
 
     # Step 3: Copy and fix config.yaml
     try:
@@ -256,18 +251,8 @@ def switch_to(target_path: str) -> SwitchResult:
         )
 
     # Step 5: Stop current bridge
-    try:
-        _stop_bridge(current_path)
-    except Exception as e:
-        # Bridge is running but we couldn't stop it — return success but with warning in result
-        # The target is running, which is the important part
-        return SwitchResult(
-            success=True,
-            target_path=target_path,
-            target_pid=target_pid,
-            error_step="stop_current",
-            error_message=f"Could not stop current bridge: {e}",
-        )
+    if not _stop_bridge(current_path):
+        raise CurrentStopError(f"Could not stop current bridge")
 
     return SwitchResult(
         success=True,
