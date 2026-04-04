@@ -540,20 +540,12 @@ class MessageHandler:
             card_lines.append("✅ **工作区干净，无待提交变更**")
 
         card_body = "\n".join(card_lines)
-        card = {
-            "schema": "2.0",
-            "config": {"wide_screen_mode": True},
-            "body": {
-                "elements": [{"tag": "markdown", "content": card_body}]
-            },
-        }
-
         try:
-            await self.feishu.send_interactive(chat_id, card, message.message_id)
-            logger.info(f"Replied git card to {message.message_id} in chat {chat_id}")
+            await self.feishu.send_interactive_reply(
+                message.chat_id, card_body, message.message_id, log_reply=True
+            )
         except Exception:
-            plain = f"📊 Git Status - {branch}\n{status_output}\n{log_lines}"
-            await self._safe_send(message.chat_id, message.message_id, plain)
+            await self._safe_send(message.chat_id, message.message_id, card_body)
 
         return HandlerResult(success=True)
 
