@@ -20,12 +20,22 @@ class StartupTimeoutError(SwitchError): pass
 
 
 @dataclass
+class SwitchStep:
+    """A single step in the switch process, yielded as it happens."""
+    step: int          # 1–5
+    total: int         # always 5
+    label: str         # short label shown to user
+    status: str        # "done" | "error" | "final"
+    detail: str = ""   # extra info (PID, path, etc.)
+    success: bool = False   # True only on the final step on success
+    target_pid: Optional[int] = None  # available on the final step
+
+
+@dataclass
 class SwitchResult:
     success: bool
     target_path: str
     target_pid: Optional[int] = None
-    error_step: Optional[str] = None
-    error_message: Optional[str] = None
 
 
 def _pid_file_path(project_path: str) -> str:
@@ -100,33 +110,6 @@ def _stop_bridge(project_path: str) -> bool:
     return True
 
 
-def _check_target_initialized(target_path: str) -> None:
-    """Check if target project is initialized with valid config and credentials."""
-    config_path = _config_file_path(target_path)
-
-    if not os.path.exists(config_path):
-        raise NotInitializedError(
-            f"Target project not initialized: config.yaml not found at {config_path}"
-        )
-
-    try:
-        with open(config_path) as f:
-            raw = yaml.safe_load(f)
-    except yaml.YAMLError as e:
-        raise NotInitializedError(f"Target config.yaml is invalid YAML: {e}")
-
-    if not raw:
-        raise NotInitializedError(f"Target config.yaml is empty")
-
-    feishu = raw.get("feishu", {})
-    app_id = feishu.get("app_id") if isinstance(feishu, dict) else None
-    app_secret = feishu.get("app_secret") if isinstance(feishu, dict) else None
-
-    if not app_id or not app_secret:
-        raise NotInitializedError(
-            f"Target config.yaml missing feishu.app_id or feishu.app_secret"
-        )
-
 
 def _copy_and_fix_config(current_path: str, target_path: str) -> None:
     """Read current config.yaml, rewrite storage.db_path to target's sessions.db, write to target."""
@@ -194,73 +177,50 @@ def _start_bridge(target_path: str, timeout: float = 8.0) -> int:
     )
 
 
-def switch_to(target_path: str) -> SwitchResult:
-    """Execute the full project switch flow.
+def switch_to(target_path: str):
+    """Execute the full project switch flow, yielding SwitchStep as each step completes.
 
-    Steps (stop on failure, no rollback):
-    1. Check target initialized (config.yaml with feishu.app_id + app_secret)
-    2. Stop target bridge if running
-    3. Copy and fix config.yaml (rewrite storage.db_path to target's sessions.db)
-    4. Start target bridge
+    Steps (stops on error, no rollback):
+    1. Stop target bridge (if running)
+    2. Copy config.yaml to target (rewrite storage.db_path)
+    3. Start bridge in target
+    4. Verify target bridge is running
     5. Stop current bridge
 
-    Returns SwitchResult with success=True and target_pid on success,
-    or success=False with error_step and error_message on failure.
+    Yields SwitchStep for each step. Caller prints/logs/sends Feishu messages.
+    Raises SwitchError on fatal failure.
     """
-    # Get current project path (cwd)
     current_path = os.getcwd()
 
-    # Step 1: Check target initialized
-    try:
-        _check_target_initialized(target_path)
-    except NotInitializedError as e:
-        return SwitchResult(
-            success=False,
-            target_path=target_path,
-            error_step="check_initialized",
-            error_message=str(e),
-        )
-
-    # Step 2: Stop target bridge if running
+    # Step 1: Stop target bridge
+    yield SwitchStep(step=1, total=5, label="停止目标 bridge", status="done")
     if not _stop_bridge(target_path):
-        raise TargetStopError(f"Failed to stop target bridge")
+        raise TargetStopError(f"无法停止目标 bridge")
 
-    # Step 3: Copy and fix config.yaml
+    # Step 2: Copy and fix config.yaml
+    yield SwitchStep(step=2, total=5, label="拷贝配置文件", status="done")
     try:
         _copy_and_fix_config(current_path, target_path)
     except Exception as e:
-        return SwitchResult(
-            success=False,
-            target_path=target_path,
-            error_step="copy_config",
-            error_message=f"Failed to copy config to target: {e}",
-        )
+        raise SwitchError(f"无法拷贝配置文件到目标: {e}")
 
-    # Step 4: Start target bridge
+    # Step 3: Start target bridge
+    yield SwitchStep(step=3, total=5, label="启动目标 bridge", status="done")
     target_pid: Optional[int] = None
     try:
         target_pid = _start_bridge(target_path)
     except StartupTimeoutError as e:
-        return SwitchResult(
-            success=False,
-            target_path=target_path,
-            error_step="start_target",
-            error_message=str(e),
-        )
-    except Exception as e:
-        return SwitchResult(
-            success=False,
-            target_path=target_path,
-            error_step="start_target",
-            error_message=f"Failed to start target bridge: {e}",
-        )
+        raise StartupTimeoutError(f"目标 bridge 启动超时: {e}")
+
+    # Step 4: Verify target bridge is running
+    yield SwitchStep(step=4, total=5, label="确认目标 bridge 运行中", status="done", detail=f"PID {target_pid}")
 
     # Step 5: Stop current bridge
+    yield SwitchStep(step=5, total=5, label="停止当前 bridge", status="done")
     if not _stop_bridge(current_path):
-        raise CurrentStopError(f"Could not stop current bridge")
+        raise CurrentStopError(f"无法停止当前 bridge")
 
-    return SwitchResult(
-        success=True,
-        target_path=target_path,
-        target_pid=target_pid,
-    )
+    yield SwitchStep(step=5, total=5, label="切换完成", status="final",
+                     detail=f"新 bridge PID {target_pid}", success=True, target_pid=target_pid)
+
+    return SwitchResult(success=True, target_path=target_path, target_pid=target_pid)

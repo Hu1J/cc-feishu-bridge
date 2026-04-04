@@ -511,17 +511,17 @@ def main(args=None):
 
     if command == "switch":
         from cc_feishu_bridge.switcher import switch_to, SwitchError
-        # Resolve relative paths relative to cwd
         target = os.path.abspath(args.target)
         try:
-            result = switch_to(target)
+            for step in switch_to(target):
+                bar = "━" * (step.step - 1) + "▓" + "░" * (step.total - step.step)
+                if step.status == "final":
+                    print(f"\r[{bar}] ✓ {step.label} {step.detail}")
+                else:
+                    print(f"\r[{bar}] {step.label}...")
+            print()
         except SwitchError as e:
-            print(f"❌ 切换失败: {e}")
-            sys.exit(1)
-        if result.success:
-            print(f"✅ 切换成功。目标 PID: {result.target_pid}")
-        else:
-            print(f"❌ 切换失败 [{result.error_step}]: {result.error_message}")
+            print(f"\n❌ 切换失败: {e}")
             sys.exit(1)
         return
 
