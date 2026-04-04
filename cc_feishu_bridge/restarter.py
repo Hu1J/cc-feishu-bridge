@@ -114,6 +114,37 @@ def _stop_bridge(project_path: str) -> bool:
     return True
 
 
+def _restart_to(file_lock=None):
+    """Restart bridge in the current directory.
+
+    Args:
+        file_lock: FileLock object acquired by main.py; released before
+                   starting new process so the new instance can acquire it.
+    Yields RestartStep objects (4 steps total).
+    """
+    # Step 1: 准备重启
+    yield RestartStep(step=1, total=4, label=_CLI_STEP_LABELS[0], status="done")
+
+    # Step 2: 释放 FileLock（如果有），然后启动新进程
+    if file_lock is not None:
+        file_lock.release()
+
+    # Yield "启动新 bridge" before starting so the step label is shown before waiting
+    yield RestartStep(step=2, total=4, label=_CLI_STEP_LABELS[1], status="done")
+
+    new_pid = _start_bridge(os.getcwd())
+
+    # Step 3: 等待新进程就绪（_start_bridge already waits for pid file, so this step is immediate）
+    yield RestartStep(step=3, total=4, label=_CLI_STEP_LABELS[2], status="done")
+
+    # Step 4: 重启完成
+    yield RestartStep(
+        step=4, total=4, label=_CLI_STEP_LABELS[3],
+        status="final", detail=f"新 PID {new_pid}",
+        success=True, new_pid=new_pid,
+    )
+
+
 def _start_bridge(project_path: str, timeout: float = 8.0) -> int:
     """Start the bridge for project using subprocess.Popen with start_new_session=True.
 

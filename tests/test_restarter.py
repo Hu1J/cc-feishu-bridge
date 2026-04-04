@@ -1,5 +1,6 @@
 """Tests for restarter.py."""
 import pytest
+from unittest.mock import patch, MagicMock
 
 from cc_feishu_bridge.restarter import (
     RestartError,
@@ -8,6 +9,7 @@ from cc_feishu_bridge.restarter import (
     RestartResult,
     _CLI_STEP_LABELS,
     _FEISHU_STEP_LABELS,
+    _restart_to,
 )
 
 
@@ -122,3 +124,58 @@ class TestExceptions:
         """StartupTimeoutError can be raised and caught."""
         with pytest.raises(StartupTimeoutError):
             raise StartupTimeoutError("test timeout")
+
+
+class TestRestartTo:
+    """Tests for _restart_to generator."""
+
+    def test_yields_4_steps(self):
+        """_restart_to yields exactly 4 RestartStep objects."""
+        with patch("cc_feishu_bridge.restarter._start_bridge") as mock_start:
+            mock_start.return_value = 12345
+            steps = list(_restart_to())
+            assert len(steps) == 4
+
+    def test_final_step_has_success_and_new_pid(self):
+        """Final step has success=True and new_pid equal to mocked return value."""
+        with patch("cc_feishu_bridge.restarter._start_bridge") as mock_start:
+            mock_start.return_value = 99999
+            steps = list(_restart_to())
+            final_step = steps[-1]
+            assert final_step.success is True
+            assert final_step.new_pid == 99999
+            assert final_step.status == "final"
+
+    def test_calls_file_lock_release_when_provided(self):
+        """file_lock.release() is called when file_lock is provided."""
+        mock_lock = MagicMock()
+        with patch("cc_feishu_bridge.restarter._start_bridge") as mock_start:
+            mock_start.return_value = 12345
+            list(_restart_to(file_lock=mock_lock))
+            mock_lock.release.assert_called_once()
+
+    def test_no_file_lock_release_when_not_provided(self):
+        """file_lock.release() is not called when file_lock is None."""
+        with patch("cc_feishu_bridge.restarter._start_bridge") as mock_start:
+            mock_start.return_value = 12345
+            list(_restart_to(file_lock=None))
+            # No error means no release() called on None
+
+    def test_step_labels_correct(self):
+        """Each step has correct label from _CLI_STEP_LABELS."""
+        with patch("cc_feishu_bridge.restarter._start_bridge") as mock_start:
+            mock_start.return_value = 12345
+            steps = list(_restart_to())
+            assert steps[0].label == _CLI_STEP_LABELS[0]
+            assert steps[1].label == _CLI_STEP_LABELS[1]
+            assert steps[2].label == _CLI_STEP_LABELS[2]
+            assert steps[3].label == _CLI_STEP_LABELS[3]
+
+    def test_step_numbers_correct(self):
+        """Each step has correct step number and total."""
+        with patch("cc_feishu_bridge.restarter._start_bridge") as mock_start:
+            mock_start.return_value = 12345
+            steps = list(_restart_to())
+            for i, s in enumerate(steps):
+                assert s.step == i + 1
+                assert s.total == 4
