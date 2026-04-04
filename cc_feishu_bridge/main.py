@@ -460,8 +460,7 @@ def main(args=None):
     list_parser = subparsers.add_parser("list", help="List all running instances")
 
     # stop
-    stop_parser = subparsers.add_parser("stop", help="Stop a running instance")
-    stop_parser.add_argument("pid", type=int, help="PID of the instance to stop")
+    stop_parser = subparsers.add_parser("stop", help="Stop the bridge instance in the current directory")
 
     # send
     send_parser = subparsers.add_parser("send", help="Send a file or image to the active Feishu chat")
@@ -501,7 +500,22 @@ def main(args=None):
         return
 
     if command == "stop":
-        stop_bridge(args.pid)
+        # Read PID from current directory's .cc-feishu-bridge/ directory
+        try:
+            _, data_dir = resolve_config_path()
+        except Exception:
+            print("当前目录未初始化，无法停止。")
+            return
+        pid_file = os.path.join(data_dir, "cc-feishu-bridge.pid")
+        if not os.path.exists(pid_file):
+            print("当前目录无运行中的 bridge 实例。")
+            return
+        try:
+            pid = int(Path(pid_file).read_text().strip())
+        except (ValueError, OSError):
+            print("PID 文件损坏，无法停止。")
+            return
+        stop_bridge(pid)
         return
 
     if command == "send":

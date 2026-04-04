@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.6] - 2026-04-05
+
+### Changed
+- **`cc-feishu-bridge stop`**：不再需要传入 PID，直接停掉当前目录下运行的 bridge 实例；当前目录无 bridge 时给出明确提示
+
 ## [0.2.5] - 2026-04-05
 
 ### Fixed
