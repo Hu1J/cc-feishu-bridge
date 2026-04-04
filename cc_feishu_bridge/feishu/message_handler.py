@@ -491,56 +491,76 @@ class MessageHandler:
         # 变更文件
         status_output = run_git(["status", "--porcelain"])
 
-        # 最近 5 次提交: 时间 + hash(7位) + 描述
-        log_lines = run_git(["log", "--format=%ci %h %s", "-5"]).splitlines()
+        # 最近 5 次提交: ISO时间 + hash(7位) + 描述
+        # %cI = ISO 8601 格式，无空格干扰，split 不会错位
+        log_lines = run_git(["log", "--format=%cI %h %s", "-5"]).splitlines()
 
-        # 渲染 markdown
-        card_lines = ["📊 **Git Status**", "", f"🟢 **{branch}**", "", "📝 **变更文件**"]
+        # 颜色映射
+        status_color = {
+            "M": "red", "D": "red", "A": "green",
+            "R": "yellow", "U": "orange",
+        }
+
+        # 构建卡片 elements
+        elements = [
+            {"tag": "markdown", "content": f"📊 **Git Status - {branch}**"},
+            {"tag": "markdown", "content": "📝 **变更文件**"},
+        ]
 
         if status_output:
-            status_color = {
-                "M": "red", "D": "red", "A": "green",
-                "R": "yellow", "U": "orange",
-            }
             for line in status_output.splitlines():
                 idx_char = line[0]
                 wt_char = line[1]
-                # 优先取 index 位字符（已暂存），否则取 worktree 位（工作区）
                 if idx_char == "?":
-                    # ?? = untracked，两个都是 ?
                     char = "?"
                 elif idx_char == " ":
-                    # 只有 worktree 有变化
                     char = wt_char if wt_char != " " else "?"
                 else:
-                    # index 有字符（已暂存），优先用它
                     char = idx_char
                 color = status_color.get(char, "grey")
-                card_lines.append(f"<font color='{color}'>{line[:2]}</font> {line[3:]}")
+                elements.append({
+                    "tag": "markdown",
+                    "content": f"<font color='{color}'>{line[:2]}</font> {line[3:]}"
+                })
 
-            card_lines.append("")
-            card_lines.append("📋 **最近提交**")
-            card_lines.append("")
-            card_lines.append("| 时间 | Hash | 描述 |")
-            card_lines.append("|------|------|------|")
+            elements.append({"tag": "markdown", "content": "📋 **最近提交**"})
+            # 表格头部
+            elements.append({
+                "tag": "markdown",
+                "content": "| 时间 | Hash | 描述 |\n|------|------|------|"
+            })
             for log_line in log_lines:
-                parts = log_line.split(" ", 3)
-                if len(parts) >= 4:
-                    dt = parts[0] + " " + parts[1][:5]
-                    h = parts[2]
-                    msg = parts[3]
-                    card_lines.append(f"| {dt} | `{h}` | {msg} |")
+                # %cI 格式: 2026-04-04T12:00:00+08:00 hash desc
+                parts = log_line.split(" ", 2)
+                if len(parts) >= 3:
+                    # 去掉 T 和时区秒数: 2026-04-04T12:00:00+08:00 → 2026-04-04 12:00
+                    dt_raw = parts[0]  # "2026-04-04T12:00:00+08:00"
+                    dt_clean = dt_raw.replace("T", " ")[:16]  # "2026-04-04 12:00"
+                    h = parts[1]
+                    msg = parts[2]
+                    elements.append({
+                        "tag": "markdown",
+                        "content": f"| {dt_clean} | `{h}` | {msg} |"
+                    })
         else:
-            card_lines.append("✅ **工作区干净，无待提交变更**")
+            elements.append({
+                "tag": "markdown",
+                "content": "✅ **工作区干净，无待提交变更**"
+            })
 
-        card_body = "\n".join(card_lines)
+        card = {
+            "schema": "2.0",
+            "config": {"wide_screen_mode": True},
+            "body": {"elements": elements},
+        }
 
         try:
-            await self.feishu.send_interactive_reply(
-                message.chat_id, card_body, message.message_id, log_reply=True
-            )
+            await self.feishu.send_interactive(chat_id, card, message.message_id)
+            logger.info(f"Replied git card to {message.message_id} in chat {chat_id}")
         except Exception:
-            await self._safe_send(message.chat_id, message.message_id, card_body)
+            # fallback: 纯文本
+            plain = f"📊 Git Status - {branch}\n变更: {status_output}\n提交: {log_lines}"
+            await self._safe_send(message.chat_id, message.message_id, plain)
 
         return HandlerResult(success=True)
 
