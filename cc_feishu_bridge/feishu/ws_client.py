@@ -159,7 +159,7 @@ class FeishuWSClient:
                     parent_id=getattr(message, "parent_id", ""),
                     thread_id=getattr(message, "thread_id", ""),
                 )
-                logger.info(f"Received message from {user_open_id}: type={msg_type!r} parent_id={getattr(message, 'parent_id', '')!r} content={content!r}")
+                logger.info(f"Received message from {user_open_id}: type={msg_type!r} parent_id={getattr(message, 'parent_id', '')!r} raw_content={content_str!r}")
                 try:
                     loop = asyncio.get_running_loop()
                 except RuntimeError:
