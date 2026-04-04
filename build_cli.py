@@ -31,6 +31,7 @@ HIDDEN_IMPORTS = [
     "cc_feishu_bridge.install.api",
     "cc_feishu_bridge.install.qr",
     "cc_feishu_bridge.install.flow",
+    "cc_feishu_bridge.switcher",
     "filelock",
     "qrcode",
     "PIL",
