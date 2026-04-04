@@ -350,13 +350,19 @@ class MessageHandler:
                     )
                     logger.info(f"[stream] tool: {claude_msg.tool_name} | input: {claude_msg.tool_input}")
 
-                    # _DiffMarker → 彩色卡片；其他 → backtick 格式
+                    # _DiffMarker / list[_DiffMarker] → 彩色卡片；其他 → backtick 格式
                     if isinstance(result, _DiffMarker):
-                        cards = result.card if isinstance(result.card, list) else [result.card]
-                        for card in cards:
+                        for card in result.card if isinstance(result.card, list) else [result.card]:
                             await self.feishu.send_edit_diff_card(
                                 message.chat_id, card, message.message_id, log_reply=False
                             )
+                    elif isinstance(result, list):
+                        for marker in result:
+                            if isinstance(marker, _DiffMarker):
+                                for card in marker.card if isinstance(marker.card, list) else [marker.card]:
+                                    await self.feishu.send_edit_diff_card(
+                                        message.chat_id, card, message.message_id, log_reply=False
+                                    )
                     else:
                         await self._safe_send(message.chat_id, message.message_id, result, log_reply=False)
                 elif claude_msg.content:
