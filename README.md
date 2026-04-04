@@ -8,6 +8,7 @@ Claude Code 飞书桥接插件 — 在飞书中与本地 Claude Code 对话。
 - `/status` — 查看当前会话状态（会话 ID、消息数、累计费用、工作目录）
 - `/stop` — 打断 Claude 当前正在执行的查询
 - `/git` — 显示当前项目 git status 和最近 5 次提交
+- `/switch <目录>` — 切换到另一个项目的 bridge 实例（仅飞书消息指令方式）
 - `/help` — 查看所有可用命令
 
 ## 核心功能
@@ -126,9 +127,20 @@ storage:
 在不同目录下启动 `cc-feishu-bridge`，即可同时运行多个机器人实例，每个实例有独立的工作目录和配置文件：
 
 ```bash
-cd /path/to/project-A && cc-feishu-bridge  # 机器人 A 在 /path/to/project-A 下工作
-cd /path/to/project-B && cc-feishu-bridge  # 机器人 B 在 /path/to/project-B 下工作
+cd /path/to-project-A && cc-feishu-bridge  # 机器人 A 在 /path/to/project-A 下工作
+cd /path/to-project-B && cc-feishu-bridge  # 机器人 B 在 /path/to/project-B 下工作
 ```
+
+## 项目切换
+
+在飞书消息中发送 `/switch <目标目录>` 即可在不停机的情况下将消息流切换到另一个项目：
+
+- 停止当前 bridge（飞书连接断开）
+- 将 config.yaml 拷贝至目标目录（`storage.db_path` 和 `claude.approved_directory` 自动重写为目标路径）
+- 在目标目录启动 bridge
+- 停止旧 bridge
+
+切换完成后飞书机器人自动连接新项目，可继续对话。
 
 ## 安全说明
 

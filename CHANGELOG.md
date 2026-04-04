@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.5] - 2026-04-05
+
+### Fixed
+- **CLI switch 飞书通知**：修复 `cc-feishu-bridge switch` 执行时飞书消息不发送的问题——`asyncio.new_event_loop()` 创建后未设为当前线程 active loop，导致 FeishuClient/aiohttp 异步请求失败
+- **approved_directory 路径重写**：切换项目时拷贝 config.yaml 同时重写 `claude.approved_directory` 为目标目录（之前只重写 `storage.db_path`）
+
 ## [0.2.4] - 2026-04-04
 
 ### Added
