@@ -165,14 +165,13 @@ def _start_bridge(target_path: str, timeout: float = 8.0) -> int:
     # Remove stale pid file if exists
     Path(pid_file).unlink(missing_ok=True)
 
-    # Start bridge using main.py's start command
-    # We use sys.executable to ensure we use the same Python interpreter
-    import sys
+    # Start bridge via the installed binary (works for both pip installs and
+    # PyInstaller binaries — cc-feishu-bridge is in PATH in both cases)
     target_cc = os.path.join(target_path, ".cc-feishu-bridge")
     stdout_log = open(os.path.join(target_cc, "bridge-stdout.log"), "w")
     stderr_log = open(os.path.join(target_cc, "bridge-stderr.log"), "w")
     proc = subprocess.Popen(
-        [sys.executable, "-m", "cc_feishu_bridge.main"],
+        ["cc-feishu-bridge", "start"],
         cwd=target_path,
         stdout=stdout_log,
         stderr=stderr_log,
