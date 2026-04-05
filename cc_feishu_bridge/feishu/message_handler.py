@@ -350,6 +350,20 @@ class MessageHandler:
                 text = "\n".join(lines)
             return HandlerResult(success=True, response_text=text[:2000])
 
+        elif sub_cmd == "list":
+            # List all memories for current project
+            memories = self.memory_manager.get_by_project(self.approved_directory)
+            if not memories:
+                text = "📭 暂无记忆记录\n\n用 /memory add <内容> 添加第一条记忆"
+            else:
+                lines = [f"📒 当前项目记忆（共 {len(memories)} 条）\n"]
+                for m in memories:
+                    icon = {"problem_solution": "🧠", "project_context": "📁",
+                            "user_preference": "👤", "reference": "📖"}.get(m.type, "💡")
+                    lines.append(f"{icon} **{m.title}**\n   {m.solution[:80]}")
+                text = "\n".join(lines)
+            return HandlerResult(success=True, response_text=text[:2000])
+
         elif sub_cmd == "add":
             if not sub_arg:
                 return HandlerResult(success=True,

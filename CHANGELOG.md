@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.3] - 2026-04-05
+
+### Fixed
+- **`/memory list` 报错**：`message_handler.py` 的 `_handle_memory()` 漏掉了 `list` 子命令处理，发 `/memory list` 时误报"未知子命令"，现已补全
+
 ## [0.3.0] - 2026-04-05
 
 ### Added
