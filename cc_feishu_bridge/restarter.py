@@ -473,8 +473,6 @@ def run_update_cli(file_lock, feishu=None, chat_id: str | None = None):
                 f"无需更新，继续使用吧。"
             )
             await _send(card)
-            for step in steps:
-                yield step
             return
 
         # Normal update flow: send initial card then process each step

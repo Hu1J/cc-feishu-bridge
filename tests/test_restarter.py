@@ -463,6 +463,24 @@ class TestDoUpdate:
             assert "0.2.5" in steps[1].detail
             assert "已是最新" in steps[1].detail
 
+    def test_restart_step1_maps_to_update_step4_label(self):
+        """Update step 4 (first restart step) has label '准备重启'.
+
+        Regression test: restart_step.step=1 must map to _UPDATE_CLI_STEP_LABELS[4]
+        which should be '准备重启' (the first restart step label).
+        """
+        with patch("cc_feishu_bridge.restarter.check_version") as mock_cv:
+            mock_cv.return_value = ("0.2.5", "0.2.6")  # update available
+            with patch("subprocess.run") as mock_pip:
+                mock_pip.return_value = MagicMock(returncode=0)
+                with patch("cc_feishu_bridge.restarter._start_bridge") as mock_start:
+                    mock_start.return_value = 12345
+                    mock_lock = MagicMock()
+                    steps = list(_do_update(file_lock=mock_lock))
+                    # steps[3] is update step 4 (the first restart step, restart_step.step=1)
+                    assert steps[3].step == 4
+                    assert steps[3].label == "准备重启"
+
 
 class TestRunUpdateCliAlreadyLatest:
     """Tests for run_update_cli early return when already latest."""
@@ -497,8 +515,8 @@ class TestRunUpdateCliAlreadyLatest:
             assert "🔄 正在更新" in sent_cards[0]
             assert "✅ 已是最新版本" in sent_cards[1]
             assert "0.2.5" in sent_cards[1]
-            # No restart steps yielded (steps 3-7 not present)
-            assert len(steps) == 2
+            # No steps yielded when status == "skip" (returns immediately after sending card)
+            assert len(steps) == 0
 
 
 class TestRunUpdateCliWithUpdate:
