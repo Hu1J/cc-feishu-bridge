@@ -7,10 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.2.7] - 2026-04-05
 
 ### Added
-- **`cc-feishu-bridge restart`**：重启当前目录的 bridge 实例，所有通知卡片在退出前发完
-- **`cc-feishu-bridge update`**：检查 PyPI 最新版本，有更新则下载并自动 restart
-- **`/restart` 飞书指令**：与 CLI 命令行为一致，支持飞书端热重启
-- **`/update` 飞书指令**：飞书端热升级，步骤：检查更新 → 下载 → 重启
+- **`/restart` 飞书指令**：热重启当前 bridge 实例，所有通知卡片在退出前发完
+- **`/update` 飞书指令**：检查 PyPI 最新版本，有更新则下载并自动 restart
+
+### Removed
+- **CLI 桌面客户端发布**：取消 GitHub Release / PyInstaller / pip script 入口，改为源码安装方式；`/restart` 和 `/update` 指令保留，可通过飞书指令使用
 
 ## [0.2.6] - 2026-04-05
 

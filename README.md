@@ -54,39 +54,7 @@ pip install -U cc-feishu-bridge
 cc-feishu-bridge
 ```
 
-### 方式二：直接运行编译好的 CLI
-
-下载对应平台的压缩包并解压，然后将其加入系统 PATH 环境变量：
-
-| 平台 | 架构 | 下载文件 |
-|------|------|---------|
-| macOS | Apple Silicon (arm64) | `cc-feishu-bridge-macos-arm64` |
-| macOS | Intel (x86_64) | `cc-feishu-bridge-macos-x86_64` |
-| Windows | x86_64 | `cc-feishu-bridge-windows-x86_64.exe` |
-
-**macOS / Linux：**
-
-```bash
-# 下载并解压后，移入 PATH
-chmod +x cc-feishu-bridge-*
-sudo mv cc-feishu-bridge-* /usr/local/bin/cc-feishu-bridge
-
-# 验证安装成功
-cc-feishu-bridge
-```
-
-**Windows：**
-
-1. 下载 `cc-feishu-bridge-windows-x86_64.exe` 并放到任意目录，例如 `C:\Program Files\cc-feishu-bridge\`
-2. 按 `Win + R` 输入 `sysdm.cpl` → 高级 → 环境变量
-3. 在用户变量或系统变量的 `Path` 中添加该目录路径
-4. 重新打开命令提示符验证：
-
-```cmd
-cc-feishu-bridge.exe
-```
-
-### 方式三：源码安装
+### 方式二：源码安装
 
 ```bash
 git clone https://github.com/Hu1J/cc-feishu-bridge.git
