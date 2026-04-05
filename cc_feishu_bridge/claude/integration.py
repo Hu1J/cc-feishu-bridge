@@ -55,6 +55,7 @@ class ClaudeIntegration:
         session_id: str | None = None,
         cwd: str | None = None,
         on_stream: StreamCallback | None = None,
+        memory_context: str | None = None,
     ) -> tuple[str, str | None, float]:
         """
         Send a message to Claude Code and get the response.
@@ -63,6 +64,12 @@ class ClaudeIntegration:
         """
         try:
             from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
+            from cc_feishu_bridge.claude.memory_tools import MEMORY_SEARCH_TOOL
+
+            # Build effective prompt with memory context
+            effective_prompt = prompt
+            if memory_context:
+                effective_prompt = f"{memory_context}\n\n{prompt}"
 
             options = ClaudeAgentOptions(
                 cwd=cwd or self.approved_directory or ".",
@@ -71,6 +78,7 @@ class ClaudeIntegration:
                 include_partial_messages=True,
                 permission_mode="bypassPermissions",
                 continue_conversation=bool(session_id),
+                tools=[MEMORY_SEARCH_TOOL],
             )
 
             client = ClaudeSDKClient(options=options)
@@ -82,7 +90,7 @@ class ClaudeIntegration:
             async with client:
                 self._active_client = client
                 try:
-                    await client.query(prompt=prompt, session_id=session_id)
+                    await client.query(prompt=effective_prompt, session_id=session_id)
 
                     async for message in client.receive_response():
                         msg_type = type(message).__name__
