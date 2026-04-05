@@ -449,15 +449,42 @@ def _run_memory_command(args) -> None:
     mm = MemoryManager()
     sub = args.memory_cmd
 
+    # Try to send results to Feishu if we're in a bridge session
+    feishu_client = None
+    feishu_chat_id = None
+    try:
+        cfg_path, data_dir = resolve_config_path()
+        config = load_config(cfg_path)
+        from cc_feishu_bridge.feishu.client import FeishuClient
+        from cc_feishu_bridge.claude.session_manager import SessionManager
+        feishu_client = FeishuClient(
+            app_id=config.feishu.app_id,
+            app_secret=config.feishu.app_secret,
+        )
+        sm = SessionManager(db_path=os.path.join(data_dir, "sessions.db"))
+        session = sm.get_active_session_by_chat_id()
+        feishu_chat_id = session.chat_id if session and session.chat_id else None
+    except Exception:
+        pass  # Not in a bridge session, skip Feishu push
+
+    def _type_icon(mtype: str) -> str:
+        return {"problem_solution": "🧠", "project_context": "📁", "user_preference": "👤"}.get(mtype, "💡")
+
+    async def _send_feishu(text: str):
+        if feishu_client and feishu_chat_id:
+            await feishu_client.send_text(feishu_chat_id, text)
+
     if sub == "search":
         query = " ".join(args.query)
         results = mm.search(query, project_path=args.project)
         if not results:
             print(f"未找到与「{query}」相关的记忆。")
+            asyncio.run(_send_feishu(f"🔍 未找到与「{query}」相关的记忆"))
             return
+
+        # Terminal output
         for m in results:
-            type_icon = {"problem_solution": "🧠", "project_context": "📁", "user_preference": "👤"}.get(m.type, "💡")
-            print(f"\n{type_icon} **{m.title}**  (id={m.id})")
+            print(f"\n{_type_icon(m.type)} **{m.title}**  (id={m.id})")
             if m.problem:
                 print(f"  问题: {m.problem}")
             if m.root_cause:
@@ -468,7 +495,18 @@ def _run_memory_command(args) -> None:
                 print(f"  项目: {m.project_path}")
         print(f"\n共找到 {len(results)} 条记忆。")
 
-    elif sub == "list":
+        # Push to Feishu
+        lines = [f"🔍 **记忆搜索: {query}**", "", f"找到 {len(results)} 条相关记忆", ""]
+        for m in results:
+            lines.append(f"{_type_icon(m.type)} **{m.title}**")
+            if m.problem:
+                lines.append(f"  问题: {m.problem}")
+            if m.root_cause:
+                lines.append(f"  根因: {m.root_cause}")
+            if m.solution:
+                lines.append(f"  解决: {m.solution}")
+            lines.append("")
+        asyncio.run(_send_feishu("\n".join(lines)))
         entries = mm.get_by_project(args.project or "", type_filter=[args.type] if args.type else None)
         if not entries:
             print("暂无记忆。")
@@ -488,11 +526,13 @@ def _run_memory_command(args) -> None:
         )
         mm.add(entry)
         print(f"✅ 记忆已保存 (id={entry.id})")
+        asyncio.run(_send_feishu(f"✅ 记忆已保存\n\n{_type_icon(entry.type)} **{entry.title}**\n{entry.solution[:100]}"))
 
     elif sub == "delete":
         ok = mm.delete(args.memory_id)
         if ok:
             print(f"🗑️ 记忆 {args.memory_id} 已删除。")
+            asyncio.run(_send_feishu(f"🗑️ 记忆 {args.memory_id} 已删除"))
         else:
             print(f"未找到 id={args.memory_id} 的记忆。")
 
@@ -500,6 +540,9 @@ def _run_memory_command(args) -> None:
         entries = mm.get_by_project("", type_filter=[args.type] if args.type else None)
         count = sum(1 for m in entries if mm.delete(m.id))
         print(f"🧹 已清除 {count} 条记忆。")
+        asyncio.run(_send_feishu(f"🧹 已清除 {count} 条记忆"))
+
+    # list is terminal-only, no Feishu push needed
 
 
 def main(args=None):
