@@ -26,7 +26,7 @@ class TestCopyAndFixConfig:
     """Tests for _copy_and_fix_config()."""
 
     def test_current_not_initialized(self, tmp_path):
-        """Current project has no config.yaml → SwitchError."""
+        """Current project has no config.yaml → returns False (skipped)."""
         current = tmp_path / "current"
         target = tmp_path / "target"
         current.mkdir()
@@ -39,9 +39,8 @@ class TestCopyAndFixConfig:
         }))
 
         with patch("cc_feishu_bridge.switcher.os.getcwd", return_value=str(current)):
-            with pytest.raises(SwitchError) as exc_info:
-                _copy_and_fix_config(str(current), str(target))
-        assert "当前项目未初始化" in str(exc_info.value)
+            result = _copy_and_fix_config(str(current), str(target))
+        assert result is False  # config copy was skipped
 
     def test_db_path_rewritten_to_target(self, tmp_path):
         """storage.db_path is rewritten to target's sessions.db."""
@@ -215,7 +214,7 @@ class TestSwitchTo:
                 list(switch_to(str(target)))
 
     def test_current_not_initialized(self, tmp_path):
-        """Current project has no config → SwitchError raised."""
+        """Current project has no config → config copy step is skipped, flow continues."""
         current = tmp_path / "current"
         target = tmp_path / "target"
         current.mkdir()  # no .cc-feishu-bridge/
@@ -226,7 +225,11 @@ class TestSwitchTo:
         (target_cc / "config.yaml").write_text("")
 
         with patch("cc_feishu_bridge.switcher._stop_bridge", return_value=True), \
+             patch("cc_feishu_bridge.switcher._start_bridge", return_value=12345), \
              patch("cc_feishu_bridge.switcher.os.getcwd", return_value=str(current)):
-            with pytest.raises(SwitchError) as exc_info:
-                list(switch_to(str(target)))
-        assert "当前项目未初始化" in str(exc_info.value)
+            steps = list(switch_to(str(target)))
+
+        # Step 2 (config copy) should be skipped, but other steps should succeed
+        assert len(steps) == 6  # 5 done + 1 final
+        assert steps[-1].success is True
+        assert steps[-1].target_pid == 12345
