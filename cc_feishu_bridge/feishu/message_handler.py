@@ -522,7 +522,19 @@ class MessageHandler:
                                 try:
                                     data = json.loads(result.tool_input)
                                     file_path = data.get("file_path", "unknown")
-                                    icon = "✏️" if result.tool_name == "Edit" else ("🧰" if result.tool_name.startswith("cc-") else "📝")
+                                    # 图标规则：Edit→✏️，cc-工具名→🧰，Bash调用skill→🧰，其他→📝
+                                    if result.tool_name == "Edit":
+                                        icon = "✏️"
+                                    elif result.tool_name.startswith("cc-"):
+                                        icon = "🧰"
+                                    elif result.tool_name == "Bash":
+                                        cmd = data.get("command", "")
+                                        if "~/.claude/skills/" in cmd or cmd.startswith("cc-"):
+                                            icon = "🧰"
+                                        else:
+                                            icon = "📝"
+                                    else:
+                                        icon = "📝"
                                     fallback = f"{icon} **{result.tool_name}** — `{file_path}`"
                                 except Exception:
                                     fallback = f"🤖 **{result.tool_name}**\n`{result.tool_input[:500]}`"
@@ -541,7 +553,18 @@ class MessageHandler:
                                         try:
                                             data = json.loads(marker.tool_input)
                                             file_path = data.get("file_path", "unknown")
-                                            icon = "✏️" if marker.tool_name == "Edit" else ("🧰" if marker.tool_name.startswith("cc-") else "📝")
+                                            if marker.tool_name == "Edit":
+                                                icon = "✏️"
+                                            elif marker.tool_name.startswith("cc-"):
+                                                icon = "🧰"
+                                            elif marker.tool_name == "Bash":
+                                                cmd = data.get("command", "")
+                                                if "~/.claude/skills/" in cmd or cmd.startswith("cc-"):
+                                                    icon = "🧰"
+                                                else:
+                                                    icon = "📝"
+                                            else:
+                                                icon = "📝"
                                             fallback = f"{icon} **{marker.tool_name}** — `{file_path}`"
                                         except Exception:
                                             fallback = f"🤖 **{marker.tool_name}**\n`{marker.tool_input[:500]}`"
