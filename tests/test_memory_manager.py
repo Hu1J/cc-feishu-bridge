@@ -44,7 +44,7 @@ def test_project_scope(mgr):
 
 
 def test_use_count_bumped_on_search(mgr):
-    entry = MemoryEntry(type="project_context", title="API v2", solution="用 /v2/ endpoint")
+    entry = MemoryEntry(type="problem_solution", title="API v2", solution="用 /v2/ endpoint")
     mgr.add(entry)
     mgr.search("API")
     found = mgr.search("API")
@@ -61,12 +61,13 @@ def test_delete(mgr):
 
 
 def test_list_by_project(mgr):
+    # user_preference is always global → get_by_project returns only project_context
     mgr.add(MemoryEntry(type="project_context", title="p1", solution="s1", project_path="/p1"))
-    mgr.add(MemoryEntry(type="user_preference", title="pref", solution="prefer dark mode", project_path="/p1"))
+    mgr.add(MemoryEntry(type="user_preference", title="global_pref", solution="prefer dark mode"))
     mgr.add(MemoryEntry(type="project_context", title="p2", solution="s2", project_path="/p2"))
     mgr.add(MemoryEntry(type="project_context", title="global", solution="s3", project_path=None))
     p1_memories = mgr.get_by_project("/p1")
-    assert len(p1_memories) == 3  # p1-specific project_context + user_preference + global
+    assert len(p1_memories) == 2  # p1-specific + global project_context; user_preference excluded
 
 
 def test_inject_context_formats_correctly(mgr):
@@ -82,7 +83,6 @@ def test_inject_context_formats_correctly(mgr):
     ctx = mgr.inject_context(project_path="/test")
     assert "pnpm" in ctx
     assert "【项目记忆]" in ctx
-    assert "👤" not in ctx  # user_preference only
 
 
 def test_inject_context_empty_when_no_memories(mgr):

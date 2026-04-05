@@ -86,14 +86,15 @@ class MemoryManager:
     def add(self, entry: MemoryEntry) -> MemoryEntry:
         """Add a memory entry and index it in FTS.
 
-        problem_solution entries are always stored as global (project_path=NULL)
-        so the same solution benefits all projects.
+        - problem_solution: always global (project_path=NULL)
+        - user_preference: always global (project_path=NULL)
+        - project_context: project-scoped (keep given project_path)
         """
         data = asdict(entry)
         if isinstance(data.get("tags"), list):
             data["tags"] = ",".join(data["tags"])
-        if entry.type == "problem_solution":
-            data["project_path"] = None  # problem_solution: always global
+        if entry.type in ("problem_solution", "user_preference"):
+            data["project_path"] = None  # always global
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 INSERT INTO memories
@@ -118,14 +119,15 @@ class MemoryManager:
         limit: int = 5,
     ) -> list[MemoryEntry]:
         """
-        Full-text search via FTS5. problem_solution is always searched globally
-        (cross-project sharing); other types are scoped to project_path.
+        Full-text search via FTS5:
+        - problem_solution + user_preference: always searched globally
+        - project_context: scoped to current project
         """
         if not query.strip():
             return []
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            # Fetch problem_solution globally (all projects share the same solutions)
+            # Fetch problem_solution globally
             ps_rows = conn.execute("""
                 SELECT m.*, bm25(memories_fts) as rank
                 FROM memories_fts
@@ -137,29 +139,35 @@ class MemoryManager:
                 LIMIT ?
             """, (query, limit)).fetchall()
 
-            # Also fetch project-scoped memories (user_preference, project_context)
-            scope_rows = []
-            # When project_path is empty/None, include both NULL and empty-string global entries
-            if project_path:
-                proj_cond = "m.project_path IS NULL OR m.project_path = '' OR m.project_path = ?"
-                proj_args = (project_path,)
-            else:
-                proj_cond = "(m.project_path IS NULL OR m.project_path = '')"
-                proj_args = ()
-            scope_rows = conn.execute(f"""
+            # Fetch user_preference globally (always shared across projects)
+            up_rows = conn.execute("""
                 SELECT m.*, bm25(memories_fts) as rank
                 FROM memories_fts
                 JOIN memories m ON memories_fts.id = m.id
                 WHERE memories_fts MATCH ?
                   AND m.status = 'active'
-                  AND m.type IN ('user_preference', 'project_context')
-                  AND ({proj_cond})
+                  AND m.type = 'user_preference'
                 ORDER BY m.use_count DESC, rank
                 LIMIT ?
-            """, (query, *proj_args, limit)).fetchall()
+            """, (query, limit)).fetchall()
 
-            # Merge: problem_solution first, then scope entries
-            rows = ps_rows + scope_rows
+            # Fetch project_context scoped to current project
+            pc_rows = []
+            if project_path:
+                pc_rows = conn.execute("""
+                    SELECT m.*, bm25(memories_fts) as rank
+                    FROM memories_fts
+                    JOIN memories m ON memories_fts.id = m.id
+                    WHERE memories_fts MATCH ?
+                      AND m.status = 'active'
+                      AND m.type = 'project_context'
+                      AND (m.project_path IS NULL OR m.project_path = '' OR m.project_path = ?)
+                    ORDER BY m.use_count DESC, rank
+                    LIMIT ?
+                """, (query, project_path, limit)).fetchall()
+
+            # Merge: problem_solution → user_preference → project_context
+            rows = ps_rows + up_rows + pc_rows
             if not rows:
                 return []
             ids = [r["id"] for r in rows]
@@ -188,7 +196,7 @@ class MemoryManager:
         If type_filter is given, only return memories of those types.
         """
         if type_filter is None:
-            type_filter = ["user_preference", "project_context"]
+            type_filter = ["project_context"]
         placeholders = ",".join("?" * len(type_filter))
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
