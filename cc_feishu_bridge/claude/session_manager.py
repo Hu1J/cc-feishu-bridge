@@ -33,6 +33,7 @@ class SessionManager:
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self._init_memories_db()
 
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
@@ -324,3 +325,13 @@ class SessionManager:
                 (message_id, session_id, chat_id, user_open_id, message_type,
                  raw_content, content, now, direction),
             )
+
+    def _init_memories_db(self):
+        """Initialize memories DB (separate file from sessions)."""
+        from cc_feishu_bridge.claude.memory_manager import MemoryManager
+        # Initialise the memories DB lazily — MemoryManager creates the file
+        # in ~/.cc-feishu-bridge/ on first access.
+        try:
+            MemoryManager()
+        except Exception:
+            logger.exception("Failed to init memories DB")
