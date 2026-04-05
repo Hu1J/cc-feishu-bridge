@@ -4,7 +4,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 import tempfile
-from cc_feishu_bridge.claude.memory_manager import MemoryManager, MemoryEntry
+from cc_feishu_bridge.claude.memory_manager import MemoryManager
 
 
 @pytest.fixture
@@ -15,78 +15,60 @@ def mgr():
         yield m
 
 
-def test_add_and_search(mgr):
-    entry = MemoryEntry(
-        type="problem_solution",
-        title="npm install 报错",
-        problem="node_modules 版本冲突",
-        solution="删掉 node_modules 重新 npm install",
-        tags=["npm", "node_modules"],
-    )
-    mgr.add(entry)
-    results = mgr.search("npm install")
-    assert len(results) >= 1
-    assert "冲突" in results[0].entry.solution or "npm" in (results[0].entry.tags or "")
+def test_add_preference_and_get_all(mgr):
+    """user_preferences: 添加后能取回，字段正确"""
+    pref = mgr.add_preference("主人信息", "我叫狗蛋，我的主人叫姚日华", "狗蛋,主人,姚日华")
+    prefs = mgr.get_all_preferences()
+    assert len(prefs) == 1
+    assert prefs[0].id == pref.id
+    assert prefs[0].title == "主人信息"
+    assert prefs[0].content == "我叫狗蛋，我的主人叫姚日华"
+    assert prefs[0].keywords == "狗蛋,主人,姚日华"
 
 
-def test_project_scope(mgr):
-    entry = MemoryEntry(
-        type="project_context",
-        title="项目用 pnpm",
-        solution="不要用 npm，用 pnpm install",
-        project_path="/a/b",
-    )
-    mgr.add(entry)
-    global_results = mgr.search("pnpm")
-    # global search may return it depending on FTS behaviour
-    project_results = mgr.search("pnpm", project_path="/a/b")
-    assert len(project_results) >= 1
+def test_project_memories_isolated_by_path(mgr):
+    """不同 project_path 的记忆互不干扰"""
+    mgr.add_project_memory("/proj-a", "用 pnpm", "不要用 npm，用 pnpm install", "pnpm,npm")
+    mgr.add_project_memory("/proj-b", "用 yarn", "不要用 npm，用 yarn", "yarn,npm")
+    results_a = mgr.search_project_memories("pnpm", project_path="/proj-a")
+    results_b = mgr.search_project_memories("pnpm", project_path="/proj-b")
+    assert any("pnpm" in r.memory.content for r in results_a)
+    assert not any("pnpm" in r.memory.content for r in results_b)
 
 
-def test_use_count_bumped_on_search(mgr):
-    entry = MemoryEntry(type="problem_solution", title="API v2", solution="用 /v2/ endpoint")
-    mgr.add(entry)
-    mgr.search("API")
-    found = mgr.search("API")
-    assert found[0].entry.use_count == 2
+def test_inject_context_returns_all_preferences(mgr):
+    """inject_context 返回所有 user_preferences"""
+    mgr.add_preference("主人信息", "我叫狗蛋", "狗蛋")
+    ctx = mgr.inject_context(project_path="/any/path")
+    assert "主人信息" in ctx
+    assert "我叫狗蛋" in ctx
 
 
-def test_delete(mgr):
-    entry = MemoryEntry(type="problem_solution", title="delete me", solution="delete this")
-    mgr.add(entry)
-    results = mgr.search("delete")
-    assert len(results) >= 1
-    mgr.delete(results[0].entry.id)
-    assert len(mgr.search("delete")) == 0
-
-
-def test_list_by_project(mgr):
-    # user_preference is global → get_by_project returns both project_context + user_preference
-    mgr.add(MemoryEntry(type="project_context", title="p1", solution="s1", project_path="/p1"))
-    mgr.add(MemoryEntry(type="user_preference", title="global_pref", solution="prefer dark mode"))
-    mgr.add(MemoryEntry(type="project_context", title="p2", solution="s2", project_path="/p2"))
-    mgr.add(MemoryEntry(type="project_context", title="global", solution="s3", project_path=None))
-    p1_memories = mgr.get_by_project("/p1")
-    assert len(p1_memories) == 3  # p1-specific + global project_context + user_preference
-
-
-def test_inject_context_formats_correctly(mgr):
-    mgr.add(MemoryEntry(
-        type="project_context",
-        title="项目用 pnpm",
-        solution="不要用 npm，用 pnpm install",
-    ))
-    mgr.add(MemoryEntry(
-        type="user_preference",
-        title="全局偏好",
-        solution="用中文写注释",
-    ))
-    ctx = mgr.inject_context(project_path="/test")
-    assert "pnpm" in ctx
-    assert "中文" in ctx
-    assert "【项目记忆]" in ctx
-
-
-def test_inject_context_empty_when_no_memories(mgr):
-    ctx = mgr.inject_context(project_path="/nonexistent")
+def test_inject_context_empty_when_no_preferences(mgr):
+    """无用户偏好时返回空字符串"""
+    ctx = mgr.inject_context(project_path="/any/path")
     assert ctx == ""
+
+
+def test_delete_project_memory(mgr):
+    """删除项目记忆"""
+    mem = mgr.add_project_memory("/proj", "测试记忆", "这是测试内容", "测试")
+    results = mgr.search_project_memories("测试", project_path="/proj")
+    assert len(results) == 1
+    ok = mgr.delete_project_memory(mem.id)
+    assert ok is True
+    results_after = mgr.search_project_memories("测试", project_path="/proj")
+    assert len(results_after) == 0
+
+
+def test_clear_project_memories(mgr):
+    """清空某项目下所有记忆"""
+    mgr.add_project_memory("/proj", "记忆1", "内容1", "关键词1")
+    mgr.add_project_memory("/proj", "记忆2", "内容2", "关键词2")
+    mgr.add_project_memory("/other", "其他", "其他内容", "其他")
+    count = mgr.clear_project_memories("/proj")
+    assert count == 2
+    results = mgr.search_project_memories("记忆", project_path="/proj")
+    assert len(results) == 0
+    results_other = mgr.search_project_memories("其他", project_path="/other")
+    assert len(results_other) == 1
