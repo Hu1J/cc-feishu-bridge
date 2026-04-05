@@ -61,27 +61,29 @@ def test_delete(mgr):
 
 
 def test_list_by_project(mgr):
-    # user_preference is always global → get_by_project returns only project_context
+    # user_preference is global → get_by_project returns both project_context + user_preference
     mgr.add(MemoryEntry(type="project_context", title="p1", solution="s1", project_path="/p1"))
     mgr.add(MemoryEntry(type="user_preference", title="global_pref", solution="prefer dark mode"))
     mgr.add(MemoryEntry(type="project_context", title="p2", solution="s2", project_path="/p2"))
     mgr.add(MemoryEntry(type="project_context", title="global", solution="s3", project_path=None))
     p1_memories = mgr.get_by_project("/p1")
-    assert len(p1_memories) == 2  # p1-specific + global project_context; user_preference excluded
+    assert len(p1_memories) == 3  # p1-specific + global project_context + user_preference
 
 
 def test_inject_context_formats_correctly(mgr):
-    entry = MemoryEntry(
+    mgr.add(MemoryEntry(
         type="project_context",
         title="项目用 pnpm",
-        problem=None,
-        root_cause=None,
         solution="不要用 npm，用 pnpm install",
-        tags=["pnpm"],
-    )
-    mgr.add(entry)
+    ))
+    mgr.add(MemoryEntry(
+        type="user_preference",
+        title="全局偏好",
+        solution="用中文写注释",
+    ))
     ctx = mgr.inject_context(project_path="/test")
     assert "pnpm" in ctx
+    assert "中文" in ctx
     assert "【项目记忆]" in ctx
 
 

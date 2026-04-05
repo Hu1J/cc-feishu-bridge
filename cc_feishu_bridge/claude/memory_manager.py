@@ -196,7 +196,7 @@ class MemoryManager:
         If type_filter is given, only return memories of those types.
         """
         if type_filter is None:
-            type_filter = ["project_context"]
+            type_filter = ["project_context", "user_preference"]
         placeholders = ",".join("?" * len(type_filter))
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
