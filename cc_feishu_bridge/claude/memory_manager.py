@@ -84,10 +84,16 @@ class MemoryManager:
             """)
 
     def add(self, entry: MemoryEntry) -> MemoryEntry:
-        """Add a memory entry and index it in FTS."""
+        """Add a memory entry and index it in FTS.
+
+        problem_solution entries are always stored as global (project_path=NULL)
+        so the same solution benefits all projects.
+        """
         data = asdict(entry)
         if isinstance(data.get("tags"), list):
             data["tags"] = ",".join(data["tags"])
+        if entry.type == "problem_solution":
+            data["project_path"] = None  # problem_solution: always global
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 INSERT INTO memories
@@ -109,25 +115,51 @@ class MemoryManager:
         self,
         query: str,
         project_path: Optional[str] = None,
-        user_id: Optional[str] = None,
         limit: int = 5,
     ) -> list[MemoryEntry]:
+        """
+        Full-text search via FTS5. problem_solution is always searched globally
+        (cross-project sharing); other types are scoped to project_path.
+        """
         if not query.strip():
             return []
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            # Fetch results with bm25 ranking
-            sql = """
+            # Fetch problem_solution globally (all projects share the same solutions)
+            ps_rows = conn.execute("""
                 SELECT m.*, bm25(memories_fts) as rank
                 FROM memories_fts
                 JOIN memories m ON memories_fts.id = m.id
                 WHERE memories_fts MATCH ?
                   AND m.status = 'active'
-                  AND (m.project_path IS NULL OR m.project_path = ?)
+                  AND m.type = 'problem_solution'
                 ORDER BY m.use_count DESC, rank
                 LIMIT ?
-            """
-            rows = conn.execute(sql, (query, project_path or "", limit)).fetchall()
+            """, (query, limit)).fetchall()
+
+            # Also fetch project-scoped memories (user_preference, project_context)
+            scope_rows = []
+            # When project_path is empty/None, include both NULL and empty-string global entries
+            if project_path:
+                proj_cond = "m.project_path IS NULL OR m.project_path = '' OR m.project_path = ?"
+                proj_args = (project_path,)
+            else:
+                proj_cond = "(m.project_path IS NULL OR m.project_path = '')"
+                proj_args = ()
+            scope_rows = conn.execute(f"""
+                SELECT m.*, bm25(memories_fts) as rank
+                FROM memories_fts
+                JOIN memories m ON memories_fts.id = m.id
+                WHERE memories_fts MATCH ?
+                  AND m.status = 'active'
+                  AND m.type IN ('user_preference', 'project_context')
+                  AND ({proj_cond})
+                ORDER BY m.use_count DESC, rank
+                LIMIT ?
+            """, (query, *proj_args, limit)).fetchall()
+
+            # Merge: problem_solution first, then scope entries
+            rows = ps_rows + scope_rows
             if not rows:
                 return []
             ids = [r["id"] for r in rows]
@@ -138,7 +170,7 @@ class MemoryManager:
                 "WHERE id IN (" + ",".join("?" * len(ids)) + ")",
                 (datetime.utcnow().isoformat(), *ids)
             )
-            # Re-fetch with ORDER BY CASE to preserve bm25 ranking
+            # Re-fetch with ORDER BY CASE to preserve original ranking
             rows = conn.execute(
                 f"SELECT * FROM memories WHERE id IN ({','.join('?' * len(ids))}) "
                 f"ORDER BY {case_expr}",

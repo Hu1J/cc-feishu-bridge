@@ -131,33 +131,43 @@ async def handle_message(message: IncomingMessage, handler: MessageHandler) -> N
 
 
 def ensure_skill_installed() -> None:
-    """Install or update the cc-feishu-send-file skill to ~/.claude/skills/.
+    """Install or update bundled skills to ~/.claude/skills/.
 
-    Idempotent: skips if version matches, updates if version differs.
-    The skill content is bundled inside the package (cc_feishu_bridge.skill_md)
-    so this works correctly whether installed via pip or as a PyInstaller binary.
+    Idempotent: skips individual skills if version matches.
+    Skill content is bundled inside the package so this works via pip or PyInstaller.
     """
     import os
 
-    from cc_feishu_bridge.skill_md import SKILL_MD, SKILL_NAME, SKILL_VERSION
+    skills = [
+        ("cc_feishu_bridge.skill_md", "SKILL_MD", "SKILL_NAME", "SKILL_VERSION"),
+        ("cc_feishu_bridge.memory_skill_md", "SKILL_MD", "SKILL_NAME", "SKILL_VERSION"),
+    ]
 
-    dest_dir = os.path.expanduser(f"~/.claude/skills/{SKILL_NAME}")
-    dest_path = os.path.join(dest_dir, "skill.md")
-    version_marker = os.path.join(dest_dir, ".version")
+    for module_path, md_attr, name_attr, ver_attr in skills:
+        try:
+            mod = __import__(module_path, fromlist=[md_attr, name_attr, ver_attr])
+            skill_md = getattr(mod, md_attr)
+            skill_name = getattr(mod, name_attr)
+            skill_version = getattr(mod, ver_attr)
+        except Exception:
+            logger.warning(f"Could not load skill from {module_path}, skipping.")
+            continue
 
-    if os.path.exists(dest_path):
+        dest_dir = os.path.expanduser(f"~/.claude/skills/{skill_name}")
+        dest_path = os.path.join(dest_dir, "skill.md")
+        version_marker = os.path.join(dest_dir, ".version")
+
         current_version = ""
         if os.path.exists(version_marker):
             current_version = open(version_marker).read().strip()
-        if current_version == SKILL_VERSION:
-            logger.info(f"Skill {SKILL_NAME} v{SKILL_VERSION} already installed, skipping.")
-            return
+        if current_version == skill_version:
+            logger.info(f"Skill {skill_name} v{skill_version} already installed, skipping.")
+            continue
 
-    # Install or update — write the bundled string to disk
-    os.makedirs(dest_dir, exist_ok=True)
-    open(dest_path, "w", encoding="utf-8").write(SKILL_MD)
-    open(version_marker, "w").write(SKILL_VERSION)
-    logger.info(f"Installed skill {SKILL_NAME} v{SKILL_VERSION} to {dest_dir}")
+        os.makedirs(dest_dir, exist_ok=True)
+        open(dest_path, "w", encoding="utf-8").write(skill_md)
+        open(version_marker, "w").write(skill_version)
+        logger.info(f"Installed skill {skill_name} v{skill_version} to {dest_dir}")
 
 
 def write_pid(pid_file: str) -> None:
@@ -432,6 +442,66 @@ def run_send_command(file_paths: list[str], config_path: str) -> None:
     asyncio.run(main_async())
 
 
+def _run_memory_command(args) -> None:
+    """Handle cc-feishu-bridge memory <subcommand>."""
+    from cc_feishu_bridge.claude.memory_manager import MemoryManager, MemoryEntry
+
+    mm = MemoryManager()
+    sub = args.memory_cmd
+
+    if sub == "search":
+        query = " ".join(args.query)
+        results = mm.search(query, project_path=args.project)
+        if not results:
+            print(f"未找到与「{query}」相关的记忆。")
+            return
+        for m in results:
+            type_icon = {"problem_solution": "🔧", "project_context": "📁", "user_preference": "👤"}.get(m.type, "💡")
+            print(f"\n{type_icon} **{m.title}**  (id={m.id})")
+            if m.problem:
+                print(f"  问题: {m.problem}")
+            if m.root_cause:
+                print(f"  根因: {m.root_cause}")
+            if m.solution:
+                print(f"  解决: {m.solution}")
+            if m.project_path:
+                print(f"  项目: {m.project_path}")
+        print(f"\n共找到 {len(results)} 条记忆。")
+
+    elif sub == "list":
+        entries = mm.get_by_project(args.project or "", type_filter=[args.type] if args.type else None)
+        if not entries:
+            print("暂无记忆。")
+            return
+        for m in entries:
+            type_icon = {"problem_solution": "🔧", "project_context": "📁", "user_preference": "👤"}.get(m.type, "💡")
+            print(f"{type_icon} [{m.type}] {m.title}  (id={m.id})")
+        print(f"\n共 {len(entries)} 条记忆。")
+
+    elif sub == "add":
+        entry = MemoryEntry(
+            type=args.type,
+            title=args.content[:60],
+            solution=args.content,
+            problem=args.problem,
+            project_path=args.project,
+        )
+        mm.add(entry)
+        print(f"✅ 记忆已保存 (id={entry.id})")
+
+    elif sub == "delete":
+        ok = mm.delete(args.memory_id)
+        if ok:
+            print(f"🗑️ 记忆 {args.memory_id} 已删除。")
+        else:
+            print(f"未找到 id={args.memory_id} 的记忆。")
+
+    elif sub == "clear":
+        entries = mm.get_by_project("", type_filter=[args.type] if args.type else None)
+        count = sum(1 for m in entries if mm.delete(m.id))
+        print(f"🧹 已清除 {count} 条记忆。")
+
+
 def main(args=None):
     # Read version once — shared by --version flag and startup banner
     try:
@@ -482,6 +552,36 @@ def main(args=None):
         "target",
         help="Target project directory (absolute or relative path)",
     )
+
+    # memory
+    memory_parser = subparsers.add_parser(
+        "memory",
+        help="Manage local memory store: search, list, add, delete, clear",
+    )
+    memory_subparsers = memory_parser.add_subparsers(dest="memory_cmd", help="Memory subcommands")
+
+    search_parser = memory_subparsers.add_parser("search", help="Search memory for solutions")
+    search_parser.add_argument("query", nargs="+", help="Search query keywords")
+    search_parser.add_argument("--project", default=None, help="Limit to specific project path")
+
+    list_parser_mem = memory_subparsers.add_parser("list", help="List all memories")
+    list_parser_mem.add_argument("--type", default=None, help="Filter by memory type")
+    list_parser_mem.add_argument("--project", default=None, help="Filter by project path")
+
+    add_parser = memory_subparsers.add_parser("add", help="Add a new memory entry")
+    add_parser.add_argument("content", help="Memory content (title and solution)")
+    add_parser.add_argument("--type", default="user_preference",
+                            choices=["problem_solution", "project_context", "user_preference"])
+    add_parser.add_argument("--project", default=None)
+    add_parser.add_argument("--problem", default=None)
+
+    delete_parser = memory_subparsers.add_parser("delete", help="Delete a memory by id")
+    delete_parser.add_argument("memory_id", help="Memory ID to delete")
+
+    clear_parser = memory_subparsers.add_parser("clear", help="Clear memories")
+    clear_parser.add_argument("--type", default=None,
+                              choices=["problem_solution", "project_context", "user_preference"])
+    clear_parser.add_argument("--project", default=None)
 
     args = parser.parse_args(args)
 
@@ -602,6 +702,10 @@ def main(args=None):
         except SwitchError as e:
             print(f"\n❌ 切换失败: {e}")
             sys.exit(1)
+        return
+
+    if command == "memory":
+        _run_memory_command(args)
         return
 
     # Default: start
