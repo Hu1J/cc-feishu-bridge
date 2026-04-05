@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Changed
+- **FTS5 中文分词优化**：使用 jieba 预分词，插入和搜索时均使用 jieba 分词，大幅提升中文关键词搜索准确率
+- **搜索排序优化**：改用 bm25 相关性排序，相关度高的结果优先返回
+- **CLI 接口重构**：`/memory` 命令支持 `user` / `proj` 子命令（add / del / update / list / search）
+
+### Fixed
+- **FTS 表同步修复**：删除和更新操作现在同步 FTS 表，不再遗漏
+- **工具引用修复**：修复 `memory_tools.py` 中工具列表引用错误的函数名
+
 ## [0.3.6] - 2026-04-05
 
 ### Changed

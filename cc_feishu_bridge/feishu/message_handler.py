@@ -331,76 +331,212 @@ class MessageHandler:
         return HandlerResult(success=True)
 
     async def _handle_memory(self, message: IncomingMessage) -> HandlerResult:
-        """Handle /memory command: list, add, search, delete, clear."""
-        parts = message.content.split(maxsplit=2)
-        sub_cmd = parts[1].lower() if len(parts) > 1 else ""
-        sub_arg = parts[2].strip() if len(parts) > 2 else ""
+        """
+        Handle /memory command.
 
-        if sub_cmd == "" or sub_cmd == "list":
-            # List all user preferences (global)
+        /memory                     — 列出所有指令说明
+        /memory user add <title>|<content>|<keywords>
+        /memory user del <id>
+        /memory user update <id> <title>|<content>|<keywords>
+        /memory user list
+        /memory user search <query>
+        /memory proj add <title>|<content>|<keywords>
+        /memory proj del <id>
+        /memory proj update <id> <title>|<content>|<keywords>
+        /memory proj list
+        /memory proj search <query>
+        """
+        parts = message.content.split(maxsplit=3)
+        scope = parts[1].lower() if len(parts) > 1 else ""
+        action = parts[2].lower() if len(parts) > 2 else ""
+        raw_args = parts[3].strip() if len(parts) > 3 else ""
+
+        # 无参数 → 显示指令说明
+        if not scope:
+            return HandlerResult(success=True, response_text=self._memory_help())
+
+        # /memory user ...
+        if scope == "user":
+            return await self._handle_memory_user(action, raw_args)
+
+        # /memory proj ...
+        if scope == "proj":
+            return await self._handle_memory_proj(action, raw_args)
+
+        return HandlerResult(success=True,
+                             response_text=f"未知 scope: {scope}\n"
+                                           "用法: /memory [user|proj] <action> [参数]")
+
+    def _memory_help(self) -> str:
+        return "\n".join([
+            "【记忆系统指令】\n",
+            "/memory user add <title>|<content>|<keywords> — 新增用户偏好",
+            "/memory user del <id> — 删除用户偏好",
+            "/memory user update <id> <title>|<content>|<keywords> — 编辑用户偏好",
+            "/memory user list — 列出用户偏好",
+            "/memory user search <关键词> — 搜索用户偏好",
+            "",
+            "/memory proj add <title>|<content>|<keywords> — 新增项目记忆",
+            "/memory proj del <id> — 删除项目记忆",
+            "/memory proj update <id> <title>|<content>|<keywords> — 编辑项目记忆",
+            "/memory proj list — 列出项目记忆",
+            "/memory proj search <关键词> — 搜索项目记忆",
+            "",
+            "关键词用逗号分隔（若有多个）",
+        ])
+
+    async def _handle_memory_user(self, action: str, raw_args: str) -> HandlerResult:
+        """Handle /memory user <action>."""
+        if action == "add":
+            parts = raw_args.split("|")
+            if len(parts) < 3:
+                return HandlerResult(success=True,
+                                     response_text="用法: /memory user add <title>|<content>|<keywords>")
+            title = parts[0].strip()
+            content = parts[1].strip()
+            keywords = parts[2].strip()
+            if not title or not content or not keywords:
+                return HandlerResult(success=True, response_text="title、content、keywords 三样必填")
+            p = self.memory_manager.add_preference(title, content, keywords)
+            return HandlerResult(success=True,
+                                 response_text=f"✅ 用户偏好已保存（ID: {p.id}）")
+
+        elif action == "del":
+            if not raw_args:
+                return HandlerResult(success=True, response_text="用法: /memory user del <id>")
+            ok = self.memory_manager.delete_preference(raw_args)
+            if ok:
+                return HandlerResult(success=True, response_text=f"🗑️ 用户偏好 {raw_args} 已删除")
+            return HandlerResult(success=True, response_text=f"未找到 id={raw_args} 的用户偏好")
+
+        elif action == "update":
+            parts = raw_args.split("|", 2)
+            if len(parts) < 3:
+                return HandlerResult(success=True,
+                                     response_text="用法: /memory user update <id> <title>|<content>|<keywords>")
+            pref_id = parts[0].strip()
+            title = parts[1].strip()
+            content = parts[2].strip()
+            keywords = ""
+            if len(parts) > 3:
+                keywords = parts[3].strip()
+            if not pref_id or not title or not content:
+                return HandlerResult(success=True, response_text="id、title、content 三样必填")
+            ok = self.memory_manager.update_preference(pref_id, title, content, keywords)
+            if ok:
+                return HandlerResult(success=True, response_text=f"✅ 用户偏好 {pref_id} 已更新")
+            return HandlerResult(success=True, response_text=f"未找到 id={pref_id} 的用户偏好")
+
+        elif action == "list":
             prefs = self.memory_manager.get_all_preferences()
             if not prefs:
-                text = "📭 暂无用户偏好记录\n\n用 /memory add <内容> 添加偏好"
-            else:
-                lines = [f"👤 用户偏好（共 {len(prefs)} 条）\n"]
-                for p in prefs:
-                    lines.append(f"**{p.title}**")
-                    lines.append(f"  {p.content[:80]}")
-                    lines.append(f"  关键词: {p.keywords}")
-                    lines.append("")
-                text = "\n".join(lines)
-            return HandlerResult(success=True, response_text=text[:2000])
+                return HandlerResult(success=True, response_text="📭 暂无用户偏好记录")
+            lines = [f"👤 用户偏好（共 {len(prefs)} 条）\n"]
+            for p in prefs:
+                lines.append(f"**{p.title}**  (id={p.id})")
+                lines.append(f"  {p.content}")
+                lines.append(f"  关键词: {p.keywords}")
+                lines.append("")
+            return HandlerResult(success=True, response_text="\n".join(lines)[:2000])
 
-        elif sub_cmd == "add":
-            if not sub_arg:
-                return HandlerResult(success=True,
-                                     response_text="用法: /memory add <记忆内容>")
-            pref = self.memory_manager.add_preference(
-                title=sub_arg[:60],
-                content=sub_arg,
-                keywords=sub_arg[:30].replace(" ", ","),
-            )
-            return HandlerResult(success=True,
-                                 response_text=f"✅ 用户偏好已保存（ID: {pref.id}）\n\n📌 {sub_arg[:100]}")
-
-        elif sub_cmd == "search":
-            if not sub_arg:
-                return HandlerResult(success=True,
-                                     response_text="用法: /memory search <关键词>")
-            results = self.memory_manager.search_project_memories(
-                sub_arg, project_path=self.approved_directory
-            )
+        elif action == "search":
+            if not raw_args:
+                return HandlerResult(success=True, response_text="用法: /memory user search <关键词>")
+            results = self.memory_manager.search_preferences(raw_args)
             if not results:
-                text = f"🔍 未找到与「{sub_arg}」相关的项目记忆"
-            else:
-                lines = [f"🔍 项目记忆搜索结果（共 {len(results)} 条）\n"]
-                for r in results:
-                    m = r.memory
-                    lines.append(f"📁 **{m.title}**")
-                    lines.append(f"  {m.content[:100]}")
-                    lines.append(f"  关键词: {m.keywords}")
-                    lines.append("")
-                text = "\n".join(lines)
-            return HandlerResult(success=True, response_text=text[:2000])
-
-        elif sub_cmd == "delete":
-            if not sub_arg:
                 return HandlerResult(success=True,
-                                     response_text="用法: /memory delete <id>")
-            ok = self.memory_manager.delete_project_memory(sub_arg)
-            if ok:
-                return HandlerResult(success=True, response_text="🗑️ 项目记忆已删除")
-            return HandlerResult(success=True, response_text="未找到该记忆")
-
-        elif sub_cmd == "clear":
-            count = self.memory_manager.clear_project_memories(self.approved_directory)
-            return HandlerResult(success=True,
-                                 response_text=f"🧹 已清除 {count} 条项目记忆")
+                                     response_text=f"未找到与「{raw_args}」相关的用户偏好")
+            lines = [f"🔍 用户偏好搜索结果（共 {len(results)} 条）\n"]
+            for p in results:
+                lines.append(f"**{p.title}**  (id={p.id})")
+                lines.append(f"  {p.content}")
+                lines.append(f"  关键词: {p.keywords}")
+                lines.append("")
+            return HandlerResult(success=True, response_text="\n".join(lines)[:2000])
 
         else:
             return HandlerResult(success=True,
-                                 response_text=f"未知子命令: {sub_cmd}\n"
-                                 "用法: /memory [list|add|search|delete|clear]")
+                                 response_text=f"未知 user action: {action}\n"
+                                               "用法: /memory user [add|del|update|list|search]")
+
+    async def _handle_memory_proj(self, action: str, raw_args: str) -> HandlerResult:
+        """Handle /memory proj <action>."""
+        if action == "add":
+            parts = raw_args.split("|")
+            if len(parts) < 3:
+                return HandlerResult(success=True,
+                                     response_text="用法: /memory proj add <title>|<content>|<keywords>")
+            title = parts[0].strip()
+            content = parts[1].strip()
+            keywords = parts[2].strip()
+            if not title or not content or not keywords:
+                return HandlerResult(success=True, response_text="title、content、keywords 三样必填")
+            m = self.memory_manager.add_project_memory(
+                self.approved_directory, title, content, keywords
+            )
+            return HandlerResult(success=True,
+                                 response_text=f"✅ 项目记忆已保存（ID: {m.id}）")
+
+        elif action == "del":
+            if not raw_args:
+                return HandlerResult(success=True, response_text="用法: /memory proj del <id>")
+            ok = self.memory_manager.delete_project_memory(raw_args)
+            if ok:
+                return HandlerResult(success=True, response_text=f"🗑️ 项目记忆 {raw_args} 已删除")
+            return HandlerResult(success=True, response_text=f"未找到 id={raw_args} 的项目记忆")
+
+        elif action == "update":
+            parts = raw_args.split("|", 2)
+            if len(parts) < 3:
+                return HandlerResult(success=True,
+                                     response_text="用法: /memory proj update <id> <title>|<content>|<keywords>")
+            mem_id = parts[0].strip()
+            title = parts[1].strip()
+            content = parts[2].strip()
+            keywords = ""
+            if len(parts) > 3:
+                keywords = parts[3].strip()
+            if not mem_id or not title or not content:
+                return HandlerResult(success=True, response_text="id、title、content 三样必填")
+            ok = self.memory_manager.update_project_memory(mem_id, title, content, keywords)
+            if ok:
+                return HandlerResult(success=True, response_text=f"✅ 项目记忆 {mem_id} 已更新")
+            return HandlerResult(success=True, response_text=f"未找到 id={mem_id} 的项目记忆")
+
+        elif action == "list":
+            mems = self.memory_manager.get_project_memories(self.approved_directory)
+            if not mems:
+                return HandlerResult(success=True, response_text="📭 暂无项目记忆记录")
+            lines = [f"📁 项目记忆（共 {len(mems)} 条）\n"]
+            for m in mems:
+                lines.append(f"**{m.title}**  (id={m.id})")
+                lines.append(f"  {m.content}")
+                lines.append(f"  关键词: {m.keywords}")
+                lines.append("")
+            return HandlerResult(success=True, response_text="\n".join(lines)[:2000])
+
+        elif action == "search":
+            if not raw_args:
+                return HandlerResult(success=True, response_text="用法: /memory proj search <关键词>")
+            results = self.memory_manager.search_project_memories(
+                raw_args, self.approved_directory
+            )
+            if not results:
+                return HandlerResult(success=True,
+                                     response_text=f"未找到与「{raw_args}」相关的项目记忆")
+            lines = [f"🔍 项目记忆搜索结果（共 {len(results)} 条）\n"]
+            for r in results:
+                m = r.memory
+                lines.append(f"**{m.title}**  (id={m.id})")
+                lines.append(f"  {m.content}")
+                lines.append(f"  关键词: {m.keywords}")
+                lines.append("")
+            return HandlerResult(success=True, response_text="\n".join(lines)[:2000])
+
+        else:
+            return HandlerResult(success=True,
+                                 response_text=f"未知 proj action: {action}\n"
+                                               "用法: /memory proj [add|del|update|list|search]")
 
     async def _handle_switch(self, message: IncomingMessage) -> HandlerResult:
         """Handle /switch <target-path> command."""
