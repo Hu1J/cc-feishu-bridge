@@ -275,9 +275,9 @@ class MessageHandler:
         elif cmd == "/switch":
             return await self._handle_switch(message)
 
-        if cmd == "/restart":
+        elif cmd == "/restart":
             return await _handle_restart(self, message)
-        if cmd == "/update":
+        elif cmd == "/update":
             return await _handle_update(self, message)
 
         else:
@@ -328,7 +328,6 @@ async def _handle_restart(handler, message: IncomingMessage) -> HandlerResult:
             message.chat_id, message.message_id,
             f"❌ 重启失败: {e}"
         )
-    import os as _os
     _os._exit(0)
 
 
@@ -344,7 +343,6 @@ async def _handle_update(handler, message: IncomingMessage) -> HandlerResult:
             message.chat_id, message.message_id,
             f"❌ 更新失败: {e}"
         )
-    import os as _os
     _os._exit(0)
 
 
