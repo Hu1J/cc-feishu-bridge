@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.6] - 2026-04-05
+
+### Changed
+- **记忆系统完全重新设计**：简化为两张表，`user_preferences`（全局）和 `project_memories`（按项目隔离），统一字段为标题+内容+关键词
+- **移除 problem_solution / project_context / user_preference 三种类型**：统一为用户偏好和项目记忆两类
+- **inject_context 行为变更**：现在只返回用户偏好，不再搜 problem_solution
+
+### Fixed
+- **Read 工具展示优化**：有 offset/limit 参数时，标题行附加 `— offset N — limit M`
+
+### Fixed
+- **记忆查询作用域隔离**：修复 project_context 查询的 `project_path IS NULL` 误匹配问题
+
 ## [0.3.5] - 2026-04-05
 
 ### Fixed
