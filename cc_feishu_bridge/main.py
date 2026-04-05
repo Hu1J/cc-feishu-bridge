@@ -456,7 +456,7 @@ def _run_memory_command(args) -> None:
             print(f"未找到与「{query}」相关的记忆。")
             return
         for m in results:
-            type_icon = {"problem_solution": "🔧", "project_context": "📁", "user_preference": "👤"}.get(m.type, "💡")
+            type_icon = {"problem_solution": "🧠", "project_context": "📁", "user_preference": "👤"}.get(m.type, "💡")
             print(f"\n{type_icon} **{m.title}**  (id={m.id})")
             if m.problem:
                 print(f"  问题: {m.problem}")
@@ -474,7 +474,7 @@ def _run_memory_command(args) -> None:
             print("暂无记忆。")
             return
         for m in entries:
-            type_icon = {"problem_solution": "🔧", "project_context": "📁", "user_preference": "👤"}.get(m.type, "💡")
+            type_icon = {"problem_solution": "🧠", "project_context": "📁", "user_preference": "👤"}.get(m.type, "💡")
             print(f"{type_icon} [{m.type}] {m.title}  (id={m.id})")
         print(f"\n共 {len(entries)} 条记忆。")
 

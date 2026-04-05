@@ -45,7 +45,7 @@ cc-feishu-bridge memory search docker build
 记忆库返回格式为：
 
 ```
-🔧 <问题标题>
+🧠 <问题标题>
   问题: <问题描述>
   根因: <根因分析>
   解决: <解决方案>
