@@ -10,6 +10,7 @@ from cc_feishu_bridge.restarter import (
     _CLI_STEP_LABELS,
     _FEISHU_STEP_LABELS,
     _restart_to,
+    run_restart,
     run_restart_cli,
 )
 
@@ -254,3 +255,75 @@ class TestRunRestartCli:
             # All steps still yielded despite send error
             assert len(steps) == 4
             assert steps[-1].status == "final"
+
+
+class TestRunRestart:
+    """Tests for run_restart()."""
+
+    def test_sends_all_4_cards(self):
+        """run_restart sends a card for every step (3 progress + 1 final)."""
+        import asyncio
+
+        with patch("cc_feishu_bridge.restarter._start_bridge") as mock_start:
+            mock_start.return_value = 12345
+            mock_lock = MagicMock()
+            mock_feishu = MagicMock()
+
+            sent_cards = []
+            async def mock_send(chat_id, card_md, reply_to):
+                sent_cards.append(card_md)
+
+            mock_feishu.send_interactive_reply = mock_send
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(
+                    run_restart(file_lock=mock_lock, feishu=mock_feishu,
+                                chat_id="test_chat", reply_to_message_id="test_reply")
+                )
+            finally:
+                loop.close()
+
+            # 4 cards sent: steps 1-3 progress + step 4 final
+            assert len(sent_cards) == 4, f"Expected 4 cards, got {len(sent_cards)}: {sent_cards}"
+
+            # Steps 1-3 are progress cards
+            for i in range(3):
+                assert "🔄 正在重启" in sent_cards[i]
+                assert "░" in sent_cards[i]  # progress bar
+                assert "✅ 重启完成" not in sent_cards[i]
+
+            # Step 4 is the final card
+            assert "✅ 重启完成" in sent_cards[3]
+            assert "12345" in sent_cards[3]
+            assert "🎉 Bridge 已重启" in sent_cards[3]
+
+    def test_progress_cards_have_correct_step_labels(self):
+        """Each progress card shows the correct step label from _FEISHU_STEP_LABELS."""
+        import asyncio
+
+        with patch("cc_feishu_bridge.restarter._start_bridge") as mock_start:
+            mock_start.return_value = 99999
+            mock_lock = MagicMock()
+            mock_feishu = MagicMock()
+
+            sent_cards = []
+            async def mock_send(chat_id, card_md, reply_to):
+                sent_cards.append(card_md)
+
+            mock_feishu.send_interactive_reply = mock_send
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(
+                    run_restart(file_lock=mock_lock, feishu=mock_feishu,
+                                chat_id="test_chat", reply_to_message_id="test_reply")
+                )
+            finally:
+                loop.close()
+
+            # Check each progress card has the correct step label
+            for i, label in enumerate(_FEISHU_STEP_LABELS[:3]):
+                assert label in sent_cards[i], f"Step {i+1} missing label {label}"
