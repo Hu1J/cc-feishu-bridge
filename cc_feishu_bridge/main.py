@@ -443,7 +443,7 @@ def run_send_command(file_paths: list[str], config_path: str) -> None:
 
 def _run_memory_command(args) -> None:
     """Handle cc-feishu-bridge memory <subcommand>."""
-    from cc_feishu_bridge.claude.memory_manager import MemoryManager, MemoryEntry
+    from cc_feishu_bridge.claude.memory_manager import MemoryManager
 
     mm = MemoryManager()
     sub = args.memory_cmd
@@ -466,84 +466,73 @@ def _run_memory_command(args) -> None:
     except Exception:
         pass  # Not in a bridge session, skip Feishu push
 
-    def _type_icon(mtype: str) -> str:
-        return {"problem_solution": "🧠", "project_context": "📁", "user_preference": "👤"}.get(mtype, "💡")
-
     async def _send_feishu(text: str):
         if feishu_client and feishu_chat_id:
             await feishu_client.send_text(feishu_chat_id, text)
 
     if sub == "search":
         query = " ".join(args.query)
-        results = mm.search(query, project_path=args.project)
+        results = mm.search_project_memories(query, project_path=args.project or "")
         if not results:
-            print(f"未找到与「{query}」相关的记忆。")
-            asyncio.run(_send_feishu(f"🔍 未找到与「{query}」相关的记忆"))
+            print(f"未找到与「{query}」相关的项目记忆。")
+            asyncio.run(_send_feishu(f"🔍 未找到与「{query}」相关的项目记忆"))
             return
 
-        # Terminal output
         for r in results:
-            m = r.entry
-            print(f"\n{_type_icon(m.type)} **{m.title}**  (id={m.id})")
-            if m.problem:
-                print(f"  问题: {m.problem}")
-            if m.root_cause:
-                print(f"  根因: {m.root_cause}")
-            if m.solution:
-                print(f"  解决: {m.solution}")
-            if m.project_path:
-                print(f"  项目: {m.project_path}")
-        print(f"\n共找到 {len(results)} 条记忆。")
+            m = r.memory
+            print(f"\n📁 **{m.title}**  (id={m.id})")
+            print(f"  {m.content[:100]}")
+            print(f"  关键词: {m.keywords}")
+            print(f"  项目: {m.project_path}")
+        print(f"\n共找到 {len(results)} 条项目记忆。")
 
-        # Push to Feishu
-        lines = [f"🔍 **记忆搜索: {query}**", "", f"找到 {len(results)} 条相关记忆", ""]
-        for r in results:
-            m = r.entry
-            lines.append(f"{_type_icon(m.type)} **{m.title}**")
-            if m.problem:
-                lines.append(f"  问题: {m.problem}")
-            if m.root_cause:
-                lines.append(f"  根因: {m.root_cause}")
-            if m.solution:
-                lines.append(f"  解决: {m.solution}")
-            lines.append("")
-        asyncio.run(_send_feishu("\n".join(lines)))
-        entries = mm.get_by_project(args.project or "", type_filter=[args.type] if args.type else None)
-        if not entries:
-            print("暂无记忆。")
+        asyncio.run(_send_feishu(f"🔍 找到 {len(results)} 条项目记忆"))
+
+    elif sub == "list":
+        prefs = mm.get_all_preferences()
+        if not prefs:
+            print("暂无用户偏好记录。")
             return
-        for m in entries:
-            type_icon = {"problem_solution": "🧠", "project_context": "📁", "user_preference": "👤"}.get(m.type, "💡")
-            print(f"{type_icon} [{m.type}] {m.title}  (id={m.id})")
-        print(f"\n共 {len(entries)} 条记忆。")
+        for p in prefs:
+            print(f"\n👤 **{p.title}**  (id={p.id})")
+            print(f"  {p.content[:100]}")
+            print(f"  关键词: {p.keywords}")
+        print(f"\n共 {len(prefs)} 条用户偏好。")
 
     elif sub == "add":
-        entry = MemoryEntry(
-            type=args.type,
-            title=args.content[:60],
-            solution=args.content,
-            problem=args.problem,
-            project_path=args.project,
-        )
-        mm.add(entry)
-        print(f"✅ 记忆已保存 (id={entry.id})")
-        asyncio.run(_send_feishu(f"✅ 记忆已保存\n\n{_type_icon(entry.type)} **{entry.title}**\n{entry.solution[:100]}"))
+        entry_type = args.type
+        title = args.content[:60]
+        content = args.content
+        keywords = args.keywords or content[:30].replace(" ", ",")
+        project_path = args.project
+
+        if entry_type == "user_preference":
+            pref = mm.add_preference(title, content, keywords)
+            print(f"✅ 用户偏好已保存 (id={pref.id})")
+            asyncio.run(_send_feishu(f"✅ 用户偏好已保存\n\n👤 **{pref.title}**\n{pref.content[:100]}"))
+        elif entry_type == "project_memory":
+            if not project_path:
+                print("❌ project_memory 需要传入 --project 参数")
+                return
+            mem = mm.add_project_memory(project_path, title, content, keywords)
+            print(f"✅ 项目记忆已保存 (id={mem.id})")
+            asyncio.run(_send_feishu(f"✅ 项目记忆已保存\n\n📁 **{mem.title}**\n{mem.content[:100]}"))
 
     elif sub == "delete":
-        ok = mm.delete(args.memory_id)
+        ok = mm.delete_project_memory(args.memory_id)
         if ok:
-            print(f"🗑️ 记忆 {args.memory_id} 已删除。")
-            asyncio.run(_send_feishu(f"🗑️ 记忆 {args.memory_id} 已删除"))
+            print(f"🗑️ 项目记忆 {args.memory_id} 已删除。")
+            asyncio.run(_send_feishu(f"🗑️ 项目记忆 {args.memory_id} 已删除"))
         else:
             print(f"未找到 id={args.memory_id} 的记忆。")
 
     elif sub == "clear":
-        entries = mm.get_by_project("", type_filter=[args.type] if args.type else None)
-        count = sum(1 for m in entries if mm.delete(m.id))
-        print(f"🧹 已清除 {count} 条记忆。")
-        asyncio.run(_send_feishu(f"🧹 已清除 {count} 条记忆"))
-
-    # list is terminal-only, no Feishu push needed
+        if not args.project:
+            print("❌ 需要传入 --project 参数")
+            return
+        count = mm.clear_project_memories(args.project)
+        print(f"🧹 已清除 {count} 条项目记忆。")
+        asyncio.run(_send_feishu(f"🧹 已清除 {count} 条项目记忆。"))
 
 
 def main(args=None):
@@ -613,19 +602,17 @@ def main(args=None):
     list_parser_mem.add_argument("--project", default=None, help="Filter by project path")
 
     add_parser = memory_subparsers.add_parser("add", help="Add a new memory entry")
-    add_parser.add_argument("content", help="Memory content (title and solution)")
+    add_parser.add_argument("content", help="Memory content")
     add_parser.add_argument("--type", default="user_preference",
-                            choices=["problem_solution", "project_context", "user_preference"])
-    add_parser.add_argument("--project", default=None)
-    add_parser.add_argument("--problem", default=None)
+                            choices=["user_preference", "project_memory"])
+    add_parser.add_argument("--project", default=None, help="Project path (required for project_memory)")
+    add_parser.add_argument("--keywords", default=None, help="Keywords for search (comma-separated)")
 
     delete_parser = memory_subparsers.add_parser("delete", help="Delete a memory by id")
     delete_parser.add_argument("memory_id", help="Memory ID to delete")
 
-    clear_parser = memory_subparsers.add_parser("clear", help="Clear memories")
-    clear_parser.add_argument("--type", default=None,
-                              choices=["problem_solution", "project_context", "user_preference"])
-    clear_parser.add_argument("--project", default=None)
+    clear_parser = memory_subparsers.add_parser("clear", help="Clear project memories")
+    clear_parser.add_argument("--project", default=None, required=True, help="Project path")
 
     args = parser.parse_args(args)
 
