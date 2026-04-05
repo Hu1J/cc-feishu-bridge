@@ -469,7 +469,7 @@ class MessageHandler:
                                         except Exception:
                                             fallback = f"🤖 **{marker.tool_name}**\n`{marker.tool_input[:500]}`"
                                         logger.warning(f"send_edit_diff_card failed, falling back to: {fallback}")
-                                        await self._safe_send(message.chat_id, marker.message_id, fallback, log_reply=False)
+                                        await self._safe_send(message.chat_id, message.message_id, fallback, log_reply=False)
                     else:
                         await self._safe_send(message.chat_id, message.message_id, result, log_reply=False)
                 elif claude_msg.content:

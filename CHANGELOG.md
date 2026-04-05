@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.9] - 2026-04-05
+
+### Fixed
+- **`/help` 和 `/git` 报错**：`MessageHandler` 类缩进错误导致 `_safe_send`、`_handle_git` 等方法不在类内，引发 `AttributeError`
+- **`/update` 已是最新时 bridge 意外死亡**：`os._exit(0)` 无条件执行，现改为 `run_update` 返回 bool，只有真正更新才 exit
+- **`/update` 版本相同误触发更新**：`__version__` 硬编码为 `0.2.6`，现改为 `importlib.metadata` 动态读取，始终与 pip 安装版本一致
+- **`/status` 显示版本号错误**：同上
+- **Edit 工具降级路径报错**：fallback 分支错误引用 `marker.message_id`，`_DiffMarker` 无此字段，修复为 `message.message_id`
+- **卡片行号对齐**：零填充（`01`、`02`…）替代空格右对齐，避免等宽字体压缩导致错位
+
+### Changed
+- **`__version__`**：从 `importlib.metadata` 动态读取，版本号与 PyPI 安装包始终一致
+
 ## [0.2.7] - 2026-04-05
 
 ### Added

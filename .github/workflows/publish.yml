@@ -67,3 +67,12 @@ jobs:
 
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Upload whl to GitHub Release
+        uses: softprops/upload-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: dist/*.whl
+          draft: false
+          prerelease: false
