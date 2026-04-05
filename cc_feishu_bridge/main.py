@@ -442,11 +442,31 @@ def run_send_command(file_paths: list[str], config_path: str) -> None:
 
 
 def _run_memory_command(args) -> None:
-    """Handle cc-feishu-bridge memory <subcommand>."""
+    """Handle cc-feishu-bridge memory <scope> <action> [args]."""
     from cc_feishu_bridge.claude.memory_manager import MemoryManager
 
     mm = MemoryManager()
-    sub = args.memory_cmd
+    scope = args.memory_scope  # "user" or "proj"
+    action = getattr(args, "memory_action", None)  # "add", "del", "update", "list", "search"
+    raw_args = " ".join(args.memory_args) if isinstance(getattr(args, "memory_args", None), list) else (getattr(args, "memory_args", "") or "")
+
+    # 无参数时显示帮助
+    if scope is None or action is None:
+        print("【记忆系统指令】\n")
+        print("/memory user add <title>|<content>|<keywords> — 新增用户偏好")
+        print("/memory user del <id> — 删除用户偏好")
+        print("/memory user update <id> <title>|<content>|<keywords> — 编辑用户偏好")
+        print("/memory user list — 列出用户偏好")
+        print("/memory user search <关键词> — 搜索用户偏好")
+        print("")
+        print("/memory proj add <title>|<content>|<keywords> — 新增项目记忆")
+        print("/memory proj del <id> — 删除项目记忆")
+        print("/memory proj update <id> <title>|<content>|<keywords> — 编辑项目记忆")
+        print("/memory proj list — 列出项目记忆")
+        print("/memory proj search <关键词> — 搜索项目记忆")
+        print("")
+        print("关键词用逗号分隔（若有多个）")
+        return
 
     # Try to send results to Feishu if we're in a bridge session
     feishu_client = None
@@ -470,69 +490,136 @@ def _run_memory_command(args) -> None:
         if feishu_client and feishu_chat_id:
             await feishu_client.send_text(feishu_chat_id, text)
 
-    if sub == "search":
-        query = " ".join(args.query)
-        results = mm.search_project_memories(query, project_path=args.project or "")
-        if not results:
-            print(f"未找到与「{query}」相关的项目记忆。")
-            asyncio.run(_send_feishu(f"🔍 未找到与「{query}」相关的项目记忆"))
-            return
+    def _print(text: str):
+        print(text)
+        asyncio.run(_send_feishu(text))
 
-        for r in results:
-            m = r.memory
-            print(f"\n📁 **{m.title}**  (id={m.id})")
-            print(f"  {m.content[:100]}")
-            print(f"  关键词: {m.keywords}")
-            print(f"  项目: {m.project_path}")
-        print(f"\n共找到 {len(results)} 条项目记忆。")
+    def _parse_args(args_str: str) -> list[str]:
+        """Split by pipe to get title/content/keywords or id/title/content/keywords."""
+        return [p.strip() for p in args_str.split("|")]
 
-        asyncio.run(_send_feishu(f"🔍 找到 {len(results)} 条项目记忆"))
-
-    elif sub == "list":
-        prefs = mm.get_all_preferences()
-        if not prefs:
-            print("暂无用户偏好记录。")
-            return
-        for p in prefs:
-            print(f"\n👤 **{p.title}**  (id={p.id})")
-            print(f"  {p.content[:100]}")
-            print(f"  关键词: {p.keywords}")
-        print(f"\n共 {len(prefs)} 条用户偏好。")
-
-    elif sub == "add":
-        entry_type = args.type
-        title = args.content[:60]
-        content = args.content
-        keywords = args.keywords or content[:30].replace(" ", ",")
-        project_path = args.project
-
-        if entry_type == "user_preference":
-            pref = mm.add_preference(title, content, keywords)
-            print(f"✅ 用户偏好已保存 (id={pref.id})")
-            asyncio.run(_send_feishu(f"✅ 用户偏好已保存\n\n👤 **{pref.title}**\n{pref.content[:100]}"))
-        elif entry_type == "project_memory":
-            if not project_path:
-                print("❌ project_memory 需要传入 --project 参数")
+    # ── user ────────────────────────────────────────────────────────────────
+    if scope == "user":
+        if action == "add":
+            parts = _parse_args(raw_args)
+            if len(parts) < 3:
+                _print("用法: cc-feishu-bridge memory user add <title>|<content>|<keywords>")
                 return
-            mem = mm.add_project_memory(project_path, title, content, keywords)
-            print(f"✅ 项目记忆已保存 (id={mem.id})")
-            asyncio.run(_send_feishu(f"✅ 项目记忆已保存\n\n📁 **{mem.title}**\n{mem.content[:100]}"))
+            title, content, keywords = parts[0], parts[1], parts[2]
+            p = mm.add_preference(title, content, keywords)
+            _print(f"✅ 用户偏好已保存 (id={p.id})")
 
-    elif sub == "delete":
-        ok = mm.delete_project_memory(args.memory_id)
-        if ok:
-            print(f"🗑️ 项目记忆 {args.memory_id} 已删除。")
-            asyncio.run(_send_feishu(f"🗑️ 项目记忆 {args.memory_id} 已删除"))
-        else:
-            print(f"未找到 id={args.memory_id} 的记忆。")
+        elif action == "del":
+            if not raw_args.strip():
+                _print("用法: cc-feishu-bridge memory user del <id>")
+                return
+            ok = mm.delete_preference(raw_args)
+            if ok:
+                _print(f"🗑️ 用户偏好 {raw_args} 已删除。")
+            else:
+                _print(f"未找到 id={raw_args} 的用户偏好")
 
-    elif sub == "clear":
-        if not args.project:
-            print("❌ 需要传入 --project 参数")
-            return
-        count = mm.clear_project_memories(args.project)
-        print(f"🧹 已清除 {count} 条项目记忆。")
-        asyncio.run(_send_feishu(f"🧹 已清除 {count} 条项目记忆。"))
+        elif action == "update":
+            parts = _parse_args(raw_args)
+            if len(parts) < 4:
+                _print("用法: cc-feishu-bridge memory user update <id>|<title>|<content>|<keywords>")
+                return
+            pref_id, title, content, keywords = parts[0], parts[1], parts[2], parts[3]
+            ok = mm.update_preference(pref_id, title, content, keywords)
+            if ok:
+                _print(f"✅ 用户偏好 {pref_id} 已更新")
+            else:
+                _print(f"未找到 id={pref_id} 的用户偏好")
+
+        elif action == "list":
+            prefs = mm.get_all_preferences()
+            if not prefs:
+                _print("📭 暂无用户偏好记录")
+                return
+            for p in prefs:
+                print(f"\n👤 **{p.title}**  (id={p.id})")
+                print(f"  {p.content}")
+                print(f"  关键词: {p.keywords}")
+            print(f"\n共 {len(prefs)} 条用户偏好。")
+            asyncio.run(_send_feishu(f"👤 用户偏好（共 {len(prefs)} 条）"))
+
+        elif action == "search":
+            if not raw_args.strip():
+                _print("用法: cc-feishu-bridge memory user search <关键词>")
+                return
+            results = mm.search_preferences(raw_args)
+            if not results:
+                _print(f"未找到与「{raw_args}」相关的用户偏好")
+                return
+            for p in results:
+                print(f"\n👤 **{p.title}**  (id={p.id})")
+                print(f"  {p.content}")
+                print(f"  关键词: {p.keywords}")
+            print(f"\n共 {len(results)} 条用户偏好。")
+            asyncio.run(_send_feishu(f"🔍 找到 {len(results)} 条用户偏好"))
+
+    # ── proj ────────────────────────────────────────────────────────────────
+    elif scope == "proj":
+        project_path = args.project or ""
+
+        if action == "add":
+            parts = _parse_args(raw_args)
+            if len(parts) < 3:
+                _print("用法: cc-feishu-bridge memory proj add <title>|<content>|<keywords>")
+                return
+            title, content, keywords = parts[0], parts[1], parts[2]
+            m = mm.add_project_memory(project_path, title, content, keywords)
+            _print(f"✅ 项目记忆已保存 (id={m.id})")
+
+        elif action == "del":
+            if not raw_args.strip():
+                _print("用法: cc-feishu-bridge memory proj del <id>")
+                return
+            ok = mm.delete_project_memory(raw_args)
+            if ok:
+                _print(f"🗑️ 项目记忆 {raw_args} 已删除。")
+            else:
+                _print(f"未找到 id={raw_args} 的项目记忆")
+
+        elif action == "update":
+            parts = _parse_args(raw_args)
+            if len(parts) < 4:
+                _print("用法: cc-feishu-bridge memory proj update <id>|<title>|<content>|<keywords>")
+                return
+            mem_id, title, content, keywords = parts[0], parts[1], parts[2], parts[3]
+            ok = mm.update_project_memory(mem_id, title, content, keywords)
+            if ok:
+                _print(f"✅ 项目记忆 {mem_id} 已更新")
+            else:
+                _print(f"未找到 id={mem_id} 的项目记忆")
+
+        elif action == "list":
+            mems = mm.get_project_memories(project_path)
+            if not mems:
+                _print("📭 暂无项目记忆记录")
+                return
+            for m in mems:
+                print(f"\n📁 **{m.title}**  (id={m.id})")
+                print(f"  {m.content}")
+                print(f"  关键词: {m.keywords}")
+            print(f"\n共 {len(mems)} 条项目记忆。")
+            asyncio.run(_send_feishu(f"📁 项目记忆（共 {len(mems)} 条）"))
+
+        elif action == "search":
+            if not raw_args.strip():
+                _print("用法: cc-feishu-bridge memory proj search <关键词>")
+                return
+            results = mm.search_project_memories(raw_args, project_path)
+            if not results:
+                _print(f"未找到与「{raw_args}」相关的项目记忆")
+                return
+            for r in results:
+                m = r.memory
+                print(f"\n📁 **{m.title}**  (id={m.id})")
+                print(f"  {m.content}")
+                print(f"  关键词: {m.keywords}")
+            print(f"\n共 {len(results)} 条项目记忆。")
+            asyncio.run(_send_feishu(f"🔍 找到 {len(results)} 条项目记忆"))
 
 
 def main(args=None):
@@ -589,30 +676,50 @@ def main(args=None):
     # memory
     memory_parser = subparsers.add_parser(
         "memory",
-        help="Manage local memory store: search, list, add, delete, clear",
+        help="Manage local memory store: user or proj subcommands",
     )
-    memory_subparsers = memory_parser.add_subparsers(dest="memory_cmd", help="Memory subcommands")
+    memory_subparsers = memory_parser.add_subparsers(dest="memory_scope", help="user or proj")
 
-    search_parser = memory_subparsers.add_parser("search", help="Search memory for solutions")
-    search_parser.add_argument("query", nargs="+", help="Search query keywords")
-    search_parser.add_argument("--project", default=None, help="Limit to specific project path")
+    # /memory user add|del|update|list|search
+    user_parser = memory_subparsers.add_parser("user", help="User preference commands")
+    user_actions = user_parser.add_subparsers(dest="memory_action", help="Action")
 
-    list_parser_mem = memory_subparsers.add_parser("list", help="List all memories")
-    list_parser_mem.add_argument("--type", default=None, help="Filter by memory type")
-    list_parser_mem.add_argument("--project", default=None, help="Filter by project path")
+    ua = user_actions.add_parser("add", help="Add user preference")
+    ua.add_argument("memory_args", help="title|content|keywords")
 
-    add_parser = memory_subparsers.add_parser("add", help="Add a new memory entry")
-    add_parser.add_argument("content", help="Memory content")
-    add_parser.add_argument("--type", default="user_preference",
-                            choices=["user_preference", "project_memory"])
-    add_parser.add_argument("--project", default=None, help="Project path (required for project_memory)")
-    add_parser.add_argument("--keywords", default=None, help="Keywords for search (comma-separated)")
+    ud = user_actions.add_parser("del", help="Delete user preference")
+    ud.add_argument("memory_args", help="<id>")
 
-    delete_parser = memory_subparsers.add_parser("delete", help="Delete a memory by id")
-    delete_parser.add_argument("memory_id", help="Memory ID to delete")
+    uu = user_actions.add_parser("update", help="Update user preference")
+    uu.add_argument("memory_args", help="id|title|content|keywords")
 
-    clear_parser = memory_subparsers.add_parser("clear", help="Clear project memories")
-    clear_parser.add_argument("--project", default=None, required=True, help="Project path")
+    ul = user_actions.add_parser("list", help="List user preferences")
+    ul.add_argument("memory_args", nargs="*", default=[], help="(ignored)")
+
+    us = user_actions.add_parser("search", help="Search user preferences")
+    us.add_argument("memory_args", help="<query>")
+
+    # /memory proj add|del|update|list|search
+    proj_parser = memory_subparsers.add_parser("proj", help="Project memory commands")
+    proj_actions = proj_parser.add_subparsers(dest="memory_action", help="Action")
+
+    pa = proj_actions.add_parser("add", help="Add project memory")
+    pa.add_argument("memory_args", help="title|content|keywords")
+    pa.add_argument("--project", default=None, help="Project path")
+
+    pd = proj_actions.add_parser("del", help="Delete project memory")
+    pd.add_argument("memory_args", help="<id>")
+
+    pu = proj_actions.add_parser("update", help="Update project memory")
+    pu.add_argument("memory_args", help="id|title|content|keywords")
+
+    pl = proj_actions.add_parser("list", help="List project memories")
+    pl.add_argument("memory_args", nargs="*", default=[], help="(ignored)")
+    pl.add_argument("--project", default=None, help="Project path")
+
+    ps = proj_actions.add_parser("search", help="Search project memories")
+    ps.add_argument("memory_args", help="<query>")
+    ps.add_argument("--project", default=None, help="Project path")
 
     args = parser.parse_args(args)
 

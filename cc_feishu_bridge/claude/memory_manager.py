@@ -9,13 +9,32 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import jieba
+
 logger = logging.getLogger(__name__)
+
+
+def _tokenize(text: str) -> str:
+    """用 jieba 分词，返回空格分隔的词串。"""
+    return " ".join(jieba.cut(text))
+
 
 MEMORY_SYSTEM_GUIDE = """
 【记忆系统使用指引】
-遇到报错、构建失败、工具执行异常时，优先用 MemorySearch 搜索项目记忆。
-解决问题后主动问用户："需要记住吗？" 用户确认后用 MemoryAdd 写入（标题+内容+关键词三样必填）。
-用户说"记住 XXX"时，直接调用 MemoryAdd 写入。
+写代码、部署、调试、执行工具等遇到问题时搜索记忆：
+- 优先用 MemorySearchProj，按 keywords 搜索项目记忆
+- 搜索没有相关记忆，自己研究解决，成功后用 MemoryAddProj 新增项目记忆
+
+解决某个问题后：主动问"xxx解决方案，需要记住吗？" 确认后写入 MemoryAddProj
+平时用户说"记住 XXX" → 根据内容判断用 MemoryAddProj 或 MemoryAddUser
+关键词统一用逗号分隔（若有多个）。
+
+各工具触发场景：
+- MemoryAddProj / MemoryAddUser — 新增记忆
+- MemoryDeleteProj / MemoryDeleteUser — 删除记忆
+- MemoryUpdateProj / MemoryUpdateUser — 编辑记忆
+- MemoryListProj / MemoryListUser — 列出记忆
+- MemorySearchProj / MemorySearchUser — 搜索记忆
 """
 
 
@@ -85,7 +104,7 @@ class MemoryManager:
             # 建 user_preferences FTS5
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS user_preferences_fts USING fts5(
-                    id UNINDEXED, title, content, keywords
+                    id UNINDEXED, title, content, keywords, tokenize='unicode61'
                 )
             """)
 
@@ -105,7 +124,7 @@ class MemoryManager:
             # 建 project_memories FTS5
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS project_memories_fts USING fts5(
-                    id UNINDEXED, title, content, keywords
+                    id UNINDEXED, title, content, keywords, tokenize='unicode61'
                 )
             """)
 
@@ -135,7 +154,9 @@ class MemoryManager:
             )
             conn.execute(
                 "INSERT INTO user_preferences_fts(id, title, content, keywords) VALUES (?, ?, ?, ?)",
-                (pref.id, pref.title, pref.content, pref.keywords)
+                (pref.id, _tokenize(pref.title),
+                 _tokenize(f"{pref.title} {pref.content} {pref.keywords}"),
+                 _tokenize(pref.keywords))
             )
         return pref
 
@@ -146,7 +167,78 @@ class MemoryManager:
             rows = conn.execute(
                 "SELECT * FROM user_preferences ORDER BY created_at DESC"
             ).fetchall()
-        return [UserPreference(**dict(r)) for r in rows]
+        return [UserPreference(**{k: v for k, v in dict(r).items() if k != "_rank"}) for r in rows]
+
+    def search_preferences(self, query: str, limit: int = 5) -> list[UserPreference]:
+        """
+        全文搜索用户偏好：keywords 优先（prefix 匹配），无结果再搜 title + content。
+        """
+        if not query.strip():
+            return []
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            # 第一步：只搜 keywords（前缀匹配，兼容中文）
+            keywords_query = _tokenize(query)
+            rows = conn.execute(f"""
+                SELECT m.id, m.title, m.content, m.keywords,
+                       m.created_at, m.updated_at,
+                       bm25(user_preferences_fts) as _rank
+                FROM user_preferences_fts
+                JOIN user_preferences m ON user_preferences_fts.id = m.id
+                WHERE user_preferences_fts MATCH ?
+                ORDER BY _rank
+                LIMIT ?
+            """, (keywords_query, limit)).fetchall()
+            # 第二步：keywords 无结果，再搜 title + content（分词后匹配）
+            if not rows:
+                fallback_query = _tokenize(query)
+                rows = conn.execute(f"""
+                    SELECT m.id, m.title, m.content, m.keywords,
+                           m.created_at, m.updated_at,
+                           bm25(user_preferences_fts) as _rank
+                    FROM user_preferences_fts
+                    JOIN user_preferences m ON user_preferences_fts.id = m.id
+                    WHERE user_preferences_fts MATCH ?
+                    ORDER BY _rank
+                    LIMIT ?
+                """, (fallback_query, limit)).fetchall()
+        return [UserPreference(**{k: v for k, v in dict(r).items() if k != "_rank"}) for r in rows]
+
+    def update_preference(
+        self,
+        pref_id: str,
+        title: str,
+        content: str,
+        keywords: str,
+    ) -> bool:
+        """更新一条用户偏好"""
+        now = datetime.utcnow().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            affected = conn.execute("""
+                UPDATE user_preferences
+                SET title=?, content=?, keywords=?, updated_at=?
+                WHERE id=?
+            """, (title, content, keywords, now, pref_id)).rowcount
+            if affected > 0:
+                conn.execute(
+                    "DELETE FROM user_preferences_fts WHERE id = ?", (pref_id,)
+                )
+                conn.execute(
+                    "INSERT INTO user_preferences_fts(id, title, content, keywords) VALUES (?, ?, ?, ?)",
+                    (pref_id, _tokenize(title),
+                     _tokenize(f"{title} {content} {keywords}"),
+                     _tokenize(keywords))
+                )
+        return affected > 0
+
+    def delete_preference(self, pref_id: str) -> bool:
+        """删除一条用户偏好"""
+        with sqlite3.connect(self.db_path) as conn:
+            affected = conn.execute(
+                "DELETE FROM user_preferences WHERE id = ?", (pref_id,)
+            ).rowcount
+            conn.execute("DELETE FROM user_preferences_fts WHERE id = ?", (pref_id,))
+        return affected > 0
 
     def inject_context(self, project_path: Optional[str]) -> str:
         """
@@ -190,7 +282,9 @@ class MemoryManager:
             )
             conn.execute(
                 "INSERT INTO project_memories_fts(id, title, content, keywords) VALUES (?, ?, ?, ?)",
-                (mem.id, mem.title, mem.content, mem.keywords)
+                (mem.id, _tokenize(mem.title),
+                 _tokenize(f"{mem.title} {mem.content} {mem.keywords}"),
+                 _tokenize(mem.keywords))
             )
         return mem
 
@@ -200,20 +294,36 @@ class MemoryManager:
         project_path: str,
         limit: int = 5,
     ) -> list[MemorySearchResult]:
-        """按项目搜索项目记忆（只搜当前项目，全文检索）"""
+        """
+        按项目搜索项目记忆：keywords 优先（前缀匹配），无结果再搜 title + content。
+        """
         if not query.strip() or not project_path:
             return []
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute("""
+            # 第一步：只搜 keywords（前缀匹配，兼容中文）
+            keywords_query = _tokenize(query)
+            rows = conn.execute(f"""
                 SELECT m.*, bm25(project_memories_fts) as rank
                 FROM project_memories_fts
                 JOIN project_memories m ON project_memories_fts.id = m.id
                 WHERE project_memories_fts MATCH ?
                   AND m.project_path = ?
-                ORDER BY m.created_at DESC
+                ORDER BY rank
                 LIMIT ?
-            """, (query, project_path, limit)).fetchall()
+            """, (keywords_query, project_path, limit)).fetchall()
+            # 第二步：keywords 无结果，再搜 title + content（分词后匹配）
+            if not rows:
+                fallback_query = _tokenize(query)
+                rows = conn.execute(f"""
+                    SELECT m.*, bm25(project_memories_fts) as rank
+                    FROM project_memories_fts
+                    JOIN project_memories m ON project_memories_fts.id = m.id
+                    WHERE project_memories_fts MATCH ?
+                      AND m.project_path = ?
+                    ORDER BY rank
+                    LIMIT ?
+                """, (fallback_query, project_path, limit)).fetchall()
         results = []
         for row in rows:
             mem = ProjectMemory(
@@ -228,12 +338,64 @@ class MemoryManager:
             results.append(MemorySearchResult(memory=mem, rank=row["rank"]))
         return results
 
+    def get_project_memories(self, project_path: str) -> list[ProjectMemory]:
+        """列出某项目下所有记忆（按创建时间倒序）"""
+        if not project_path:
+            return []
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("""
+                SELECT * FROM project_memories
+                WHERE project_path = ?
+                ORDER BY created_at DESC
+            """, (project_path,)).fetchall()
+        return [
+            ProjectMemory(
+                id=row["id"],
+                project_path=row["project_path"],
+                title=row["title"],
+                content=row["content"],
+                keywords=row["keywords"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+    def update_project_memory(
+        self,
+        memory_id: str,
+        title: str,
+        content: str,
+        keywords: str,
+    ) -> bool:
+        """更新一条项目记忆"""
+        now = datetime.utcnow().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            affected = conn.execute("""
+                UPDATE project_memories
+                SET title=?, content=?, keywords=?, updated_at=?
+                WHERE id=?
+            """, (title, content, keywords, now, memory_id)).rowcount
+            if affected > 0:
+                conn.execute(
+                    "DELETE FROM project_memories_fts WHERE id = ?", (memory_id,)
+                )
+                conn.execute(
+                    "INSERT INTO project_memories_fts(id, title, content, keywords) VALUES (?, ?, ?, ?)",
+                    (memory_id, _tokenize(title),
+                     _tokenize(f"{title} {content} {keywords}"),
+                     _tokenize(keywords))
+                )
+        return affected > 0
+
     def delete_project_memory(self, memory_id: str) -> bool:
         """删除一条项目记忆"""
         with sqlite3.connect(self.db_path) as conn:
             affected = conn.execute(
                 "DELETE FROM project_memories WHERE id = ?", (memory_id,)
             ).rowcount
+            conn.execute("DELETE FROM project_memories_fts WHERE id = ?", (memory_id,))
         return affected > 0
 
     def clear_project_memories(self, project_path: str) -> int:
