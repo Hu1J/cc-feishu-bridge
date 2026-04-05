@@ -153,6 +153,7 @@ class ReplyFormatter:
             "WebFetch": "🌐",
             "WebSearch": "🌐",
             "Task": "📋",
+            "MemorySearch": "🧠",
         }
 
     def format_text(self, text: str) -> str:
@@ -229,7 +230,11 @@ class ReplyFormatter:
         command = data.get("command", tool_input)
         description = data.get("description")
 
-        icon = self.tool_icons.get("Bash", "💻")
+        # Skill 调用（~/.claude/skills/ 或 cc- 开头）用 🧰 图标
+        if "~/.claude/skills/" in command or command.strip().startswith("cc-"):
+            icon = "🧰"
+        else:
+            icon = self.tool_icons.get("Bash", "💻")
         if description:
             header = f"{icon} **Bash** — {description}"
         else:
