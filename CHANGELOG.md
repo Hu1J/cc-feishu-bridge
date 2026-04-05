@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.0] - 2026-04-05
+
+### Added
+- **记忆增强系统**：本地 SQLite+FTS5 存储，支持 CC 主动检索和自动提取，问题解决后自动记忆
+- **MemorySearch 工具**：CC 遇到报错时自动查询本地记忆库，系统提示词引导优先使用
+- **`/memory` 指令**：飞书端管理记忆，支持 list / add / search / delete / clear 子命令
+- **`/memory search` 关键词检索**：FTS5 全文搜索，命中次数多的记忆优先返回
+- **项目范围记忆**：记忆可关联项目路径，同项目内自动注入上下文
+
 ## [0.2.9] - 2026-04-05
 
 ### Fixed
