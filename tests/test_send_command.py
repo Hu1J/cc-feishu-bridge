@@ -11,10 +11,12 @@ class TestGuessFileType:
         assert guess_file_type(".pdf") == "pdf"
 
     def test_docx(self):
-        assert guess_file_type(".docx") == "docx"
+        # 飞书 file_type=doc（对应 .doc/.docx 均可）
+        assert guess_file_type(".docx") == "doc"
 
     def test_xlsx(self):
-        assert guess_file_type(".xlsx") == "xlsx"
+        # 飞书 file_type=xls（对应 .xls/.xlsx 均可）
+        assert guess_file_type(".xlsx") == "xls"
 
     def test_png(self):
         assert guess_file_type(".png") == "png"
@@ -29,10 +31,35 @@ class TestGuessFileType:
         assert guess_file_type(".txt") == "txt"
 
     def test_unknown(self):
-        assert guess_file_type(".xyz") == "bin"
+        # 未知扩展名走 stream（保持原扩展名不变，飞书也能接受）
+        assert guess_file_type(".xyz") == "stream"
 
     def test_uppercase(self):
         assert guess_file_type(".PDF") == "pdf"
+
+    # 新增：编程语言扩展名
+    def test_py(self):
+        assert guess_file_type(".py") == "stream"
+
+    def test_go(self):
+        assert guess_file_type(".go") == "stream"
+
+    def test_sh(self):
+        assert guess_file_type(".sh") == "stream"
+
+    def test_rs(self):
+        assert guess_file_type(".rs") == "stream"
+
+    def test_no_ext(self):
+        # 无扩展名走 stream
+        assert guess_file_type("") == "stream"
+
+    # .tar.gz 等复合扩展名：os.path.splitext 只取最后一个
+    def test_gz(self):
+        assert guess_file_type(".gz") == "stream"
+
+    def test_tar(self):
+        assert guess_file_type(".tar") == "stream"
 
 
 class TestSupportedImageExts:

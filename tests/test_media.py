@@ -80,8 +80,28 @@ class TestMakeFilePath:
 
     def test_unknown_file_type_gets_bin_ext(self):
         with tempfile.TemporaryDirectory() as tmpdir:
+            # 无扩展名的文件走 MIME 兜底
             path = make_file_path(tmpdir, "om_abc12345", "data", "unknowntype")
             assert path.endswith(".bin")
+
+    def test_unknown_ext_preserved(self):
+        """有扩展名但不在映射表里，扩展名仍然保留（不走 .bin）"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = make_file_path(tmpdir, "om_abc12345", "script.py", "bin")
+            assert path.endswith(".py")
+
+    def test_arbitrary_ext_preserved(self):
+        """任意扩展名（.xyz/.tmp）都保留，不变成 .bin"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = make_file_path(tmpdir, "om_abc12345", "backup.xyz", "bin")
+            assert path.endswith(".xyz")
+
+    def test_composite_ext(self):
+        """复合扩展名（.tar.gz）保留最后一个扩展名"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = make_file_path(tmpdir, "om_abc12345", "archive.tar.gz", "bin")
+            # splitext("archive.tar.gz") -> ("archive.tar", ".gz")
+            assert path.endswith(".gz")
 
 
 class TestSaveBytes:
