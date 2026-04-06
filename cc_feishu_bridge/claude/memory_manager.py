@@ -224,8 +224,6 @@ class MemoryManager:
                     ).fetchall()
 
             rows = _run(keywords_query)
-            if not rows:
-                rows = _run(keywords_query)
         return [UserPreference(**{k: v for k, v in dict(r).items() if k != "_rank"}) for r in rows]
 
     def update_preference(
@@ -436,8 +434,8 @@ class MemoryManager:
                 adapter = get_qmd_adapter()
                 if adapter.is_available():
                     adapter.add_memory(memory_id, title, content, keywords, proj_path)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("qmd sync failed for update memory %s: %s", memory_id, e)
         return affected > 0
 
     def delete_project_memory(self, memory_id: str) -> bool:
@@ -462,8 +460,8 @@ class MemoryManager:
                 adapter = get_qmd_adapter()
                 if adapter.is_available():
                     adapter.remove_memory(memory_id, proj_path)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("qmd sync failed for delete memory %s: %s", memory_id, e)
         return affected > 0
 
     def clear_project_memories(self, project_path: str) -> int:
@@ -491,6 +489,6 @@ class MemoryManager:
                 if adapter.is_available():
                     for row in rows:
                         adapter.remove_memory(row[0], project_path)
-            except Exception:
-                pass  # non-fatal
+            except Exception as e:
+                logger.warning("qmd sync failed for clear project %s: %s", project_path, e)
         return count
