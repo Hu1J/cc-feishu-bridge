@@ -23,28 +23,34 @@ except Exception:
     cosine_similarity = None
     TfidfVectorizer = None
 
+# ── 单例 ──────────────────────────────────────────────────────────────────────
 
-def _tokenize(text: str) -> str:
-    """用 jieba 分词，返回空格分隔的词串。"""
-    return " ".join(jieba.cut(text))
+_singleton: Optional["MemoryManager"] = None
+_singleton_lock = threading.Lock()
+
+
+def get_memory_manager() -> "MemoryManager":
+    """返回 MemoryManager 单例（所有调用点必须走这里，避免多实例缓存碎片化）。"""
+    global _singleton
+    if _singleton is None:
+        with _singleton_lock:
+            if _singleton is None:
+                _singleton = MemoryManager()
+    return _singleton
 
 
 MEMORY_SYSTEM_GUIDE = """
-【记忆系统使用指引】
-写代码、部署、调试、执行工具等遇到问题时搜索记忆：
-- 优先用 MemorySearchProj，按 keywords 搜索项目记忆
-- 搜索没有相关记忆，自己研究解决，成功后用 MemoryAddProj 新增项目记忆
+【记忆系统】工具前缀: mcp__memory__
 
-解决某个问题后：主动问"xxx解决方案，需要记住吗？" 确认后写入 MemoryAddProj
-平时用户说"记住 XXX" → 根据内容判断用 MemoryAddProj 或 MemoryAddUser
-关键词统一用逗号分隔（若有多个）。
+遇到问题先用 mcp__memory__MemorySearchProj 搜索项目记忆。
+搜索没有 → 自己研究 → 成功后主动问"需要记住吗？"
+用户确认后用 mcp__memory__MemoryAddProj（关键词逗号分隔）
 
-各工具触发场景：
-- MemoryAddProj / MemoryAddUser — 新增记忆
-- MemoryDeleteProj / MemoryDeleteUser — 删除记忆
-- MemoryUpdateProj / MemoryUpdateUser — 编辑记忆
-- MemoryListProj / MemoryListUser — 列出记忆
-- MemorySearchProj / MemorySearchUser — 搜索记忆
+mcp__memory__MemoryAddProj — 新增项目记忆
+mcp__memory__MemoryDeleteProj — 删除项目记忆
+mcp__memory__MemoryUpdateProj — 编辑项目记忆
+mcp__memory__MemoryListProj — 列出项目记忆
+mcp__memory__MemorySearchProj — 搜索项目记忆
 """
 
 
@@ -76,7 +82,7 @@ class ProjectMemory:
 class MemorySearchResult:
     """记忆搜索结果"""
     memory: ProjectMemory
-    rank: float  # FTS5 bm25 rank
+    rank: float  # TF-IDF cosine score (~0.05~1.0) 或 FTS5 BM25 rank (~0)，具体值取决于哪层命中
 
 
 class MemoryManager:
@@ -90,9 +96,10 @@ class MemoryManager:
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
-        # TF-IDF 向量缓存（按 project_path 分组，线程安全）
-        self._tfidf_cache: dict = {}
-        self._tfidf_lock = threading.Lock()
+
+    # ── 类级别共享缓存（所有实例共享同一份，防止多实例缓存碎片化）─────────────
+    _tfidf_cache: dict = {}
+    _tfidf_lock = threading.Lock()
 
     def _init_db(self):
         """创建/升级数据库：新建表或迁移已有表"""
@@ -180,9 +187,7 @@ class MemoryManager:
             )
             conn.execute(
                 "INSERT INTO user_preferences_fts(id, title, content, keywords) VALUES (?, ?, ?, ?)",
-                (pref.id, _tokenize(pref.title),
-                 _tokenize(f"{pref.title} {pref.content} {pref.keywords}"),
-                 _tokenize(pref.keywords))
+                (pref.id, pref.title, f"{pref.title} {pref.content} {pref.keywords}", pref.keywords)
             )
         return pref
 
@@ -220,7 +225,6 @@ class MemoryManager:
             return []
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            keywords_query = _tokenize(query)
 
             base_cols = "m.id, m.user_open_id, m.title, m.content, m.keywords, m.created_at, m.updated_at"
 
@@ -243,7 +247,7 @@ class MemoryManager:
                         (query_str, limit)
                     ).fetchall()
 
-            rows = _run(keywords_query)
+            rows = _run(query)
         return [UserPreference(**{k: v for k, v in dict(r).items() if k != "_rank"}) for r in rows]
 
     def update_preference(
@@ -267,9 +271,7 @@ class MemoryManager:
                 )
                 conn.execute(
                     "INSERT INTO user_preferences_fts(id, title, content, keywords) VALUES (?, ?, ?, ?)",
-                    (pref_id, _tokenize(title),
-                     _tokenize(f"{title} {content} {keywords}"),
-                     _tokenize(keywords))
+                    (pref_id, title, f"{title} {content} {keywords}", keywords)
                 )
         return affected > 0
 
@@ -285,7 +287,6 @@ class MemoryManager:
     def inject_context(
         self,
         user_open_id: str,
-        project_path: Optional[str] = None,
     ) -> str:
         """
         注入指定用户的偏好到 prompt（按 user_open_id 过滤，全量返回）。
@@ -335,31 +336,22 @@ class MemoryManager:
             )
             conn.execute(
                 "INSERT INTO project_memories_fts(id, title, content, keywords) VALUES (?, ?, ?, ?)",
-                (mem.id, _tokenize(mem.title),
-                 _tokenize(f"{mem.title} {mem.content} {mem.keywords}"),
-                 _tokenize(mem.keywords))
+                (mem.id, mem.title, f"{mem.title} {mem.content} {mem.keywords}", mem.keywords)
             )
-        # Sync to qmd for semantic search (non-fatal)
-        self._sync_to_qmd(mem)
-        # Invalidate TF-IDF cache for this project
-        self._tfidf_cache.pop(project_path, None)
+        # Invalidate TF-IDF cache (thread-safe)
+        self._invalidate_tfidf_cache(project_path)
         return mem
 
-    def _sync_to_qmd(self, mem: ProjectMemory):
-        """Sync a project memory to qmd (non-fatal)."""
-        try:
-            from cc_feishu_bridge.claude.qmd_adapter import get_qmd_adapter
-            adapter = get_qmd_adapter()
-            if adapter.is_available():
-                adapter.add_memory(
-                    memory_id=mem.id,
-                    title=mem.title,
-                    content=mem.content,
-                    keywords=mem.keywords,
-                    project_path=mem.project_path,
-                )
-        except Exception as e:
-            logger.warning("qmd sync failed for memory %s: %s", mem.id, e)
+    def _invalidate_tfidf_cache(self, project_path: str):
+        """线程安全地清除项目 TF-IDF 缓存（按 db_path + project_path 分隔）"""
+        cache_key = (self.db_path, project_path)
+        with self._tfidf_lock:
+            self._tfidf_cache.pop(cache_key, None)
+            # 超过 50 个项目时 evict 最老的条目
+            if len(self._tfidf_cache) > 50:
+                keys_to_remove = list(self._tfidf_cache.keys())[:25]
+                for k in keys_to_remove:
+                    del self._tfidf_cache[k]
 
     def search_project_memories(
         self,
@@ -370,7 +362,7 @@ class MemoryManager:
         """
         两层检索策略：
         1. TF-IDF cosine — 语义相似度（jieba 分词 + sklearn，离线计算）
-        2. FTS5 BM25 — 精确关键词补底
+        2. FTS5 BM25 — 精确关键词兜底
         """
         if not query.strip() or not project_path:
             return []
@@ -380,7 +372,7 @@ class MemoryManager:
         if tfidf_results:
             return tfidf_results
 
-        # 第二层：FTS5 BM25 精确补底
+        # 第二层：FTS5 BM25 精确兜底
         return self._search_fts5(query, project_path, limit)
 
     def _search_fts5(
@@ -389,7 +381,6 @@ class MemoryManager:
         """FTS5 BM25 精确关键词搜索"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            keywords_query = _tokenize(query)
             rows = conn.execute("""
                 SELECT m.id, m.project_path, m.title, m.content, m.keywords,
                        m.created_at, m.updated_at,
@@ -400,7 +391,7 @@ class MemoryManager:
                   AND m.project_path = ?
                 ORDER BY rank
                 LIMIT ?
-            """, (keywords_query, project_path, limit)).fetchall()
+            """, (query, project_path, limit)).fetchall()
         results = []
         for row in rows:
             mem = ProjectMemory(
@@ -431,7 +422,9 @@ class MemoryManager:
             return []
 
         try:
-            q_vec = vectorizer.transform([query])
+            # 查询必须与索引时分词方式一致
+            tokenized_query = " ".join(jieba.cut(query))
+            q_vec = vectorizer.transform([tokenized_query])
             scores = cosine_similarity(q_vec, matrix).flatten()
             # 只取 score > 0.05 的结果
             filtered = [(i, float(scores[i])) for i in range(len(scores)) if scores[i] > 0.05]
@@ -444,10 +437,11 @@ class MemoryManager:
             return []
 
     def _get_tfidf_cache(self, project_path: str) -> tuple:
-        """获取或构建某项目的 TF-IDF 缓存（线程安全）"""
+        """获取或构建某项目的 TF-IDF 缓存（线程安全，按 db_path + project_path 分隔）"""
+        cache_key = (self.db_path, project_path)
         with self._tfidf_lock:
-            if project_path in self._tfidf_cache:
-                return self._tfidf_cache[project_path]
+            if cache_key in self._tfidf_cache:
+                return self._tfidf_cache[cache_key]
 
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -458,8 +452,8 @@ class MemoryManager:
                 ).fetchall()
 
             if not rows:
-                self._tfidf_cache[project_path] = (None, None, [])
-                return self._tfidf_cache[project_path]
+                # 空项目不缓存 sentinel，只返回空结果
+                return (None, None, [])
 
             memories = [
                 ProjectMemory(
@@ -479,8 +473,8 @@ class MemoryManager:
             vectorizer = TfidfVectorizer(tokenizer=tokenizer)
             matrix = vectorizer.fit_transform(texts)
 
-            self._tfidf_cache[project_path] = (vectorizer, matrix, memories)
-            return self._tfidf_cache[project_path]
+            self._tfidf_cache[cache_key] = (vectorizer, matrix, memories)
+            return self._tfidf_cache[cache_key]
 
     def get_project_memories(self, project_path: str) -> list[ProjectMemory]:
         """列出某项目下所有记忆（按创建时间倒序）"""
@@ -514,10 +508,9 @@ class MemoryManager:
         content: str,
         keywords: str,
     ) -> bool:
-        """更新一条项目记忆（同步到 qmd）"""
+        """更新一条项目记忆"""
         now = datetime.utcnow().isoformat()
         with sqlite3.connect(self.db_path) as conn:
-            # Get project_path before update for qmd sync
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT project_path FROM project_memories WHERE id = ?", (memory_id,)
@@ -535,27 +528,15 @@ class MemoryManager:
                 )
                 conn.execute(
                     "INSERT INTO project_memories_fts(id, title, content, keywords) VALUES (?, ?, ?, ?)",
-                    (memory_id, _tokenize(title),
-                     _tokenize(f"{title} {content} {keywords}"),
-                     _tokenize(keywords))
+                    (memory_id, title, f"{title} {content} {keywords}", keywords)
                 )
-        # Sync to qmd
-        if affected > 0 and proj_path:
-            try:
-                from cc_feishu_bridge.claude.qmd_adapter import get_qmd_adapter
-                adapter = get_qmd_adapter()
-                if adapter.is_available():
-                    adapter.add_memory(memory_id, title, content, keywords, proj_path)
-            except Exception as e:
-                logger.warning("qmd sync failed for update memory %s: %s", memory_id, e)
-        # Invalidate TF-IDF cache for this project
+        # Invalidate TF-IDF cache
         if proj_path:
-            self._tfidf_cache.pop(proj_path, None)
+            self._invalidate_tfidf_cache(proj_path)
         return affected > 0
 
     def delete_project_memory(self, memory_id: str) -> bool:
-        """删除一条项目记忆（同步到 qmd）"""
-        # Get project_path before deleting (for qmd sync)
+        """删除一条项目记忆"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
@@ -568,22 +549,13 @@ class MemoryManager:
             ).rowcount
             conn.execute("DELETE FROM project_memories_fts WHERE id = ?", (memory_id,))
 
-        # Sync to qmd
-        if affected > 0 and proj_path:
-            try:
-                from cc_feishu_bridge.claude.qmd_adapter import get_qmd_adapter
-                adapter = get_qmd_adapter()
-                if adapter.is_available():
-                    adapter.remove_memory(memory_id, proj_path)
-            except Exception as e:
-                logger.warning("qmd sync failed for delete memory %s: %s", memory_id, e)
-        # Invalidate TF-IDF cache for this project
+        # Invalidate TF-IDF cache
         if proj_path:
-            self._tfidf_cache.pop(proj_path, None)
+            self._invalidate_tfidf_cache(proj_path)
         return affected > 0
 
     def clear_project_memories(self, project_path: str) -> int:
-        """清空某项目下所有记忆（SQLite + qmd 同步删除）"""
+        """清空某项目下所有记忆"""
         if not project_path:
             return 0
         with sqlite3.connect(self.db_path) as conn:
@@ -594,21 +566,12 @@ class MemoryManager:
             ids = [row[0] for row in rows]
             count = len(ids)
             if count == 0:
+                self._invalidate_tfidf_cache(project_path)
                 return 0
             placeholders = ",".join("?" * len(ids))
             conn.execute("DELETE FROM project_memories WHERE project_path = ?", (project_path,))
             conn.execute(f"DELETE FROM project_memories_fts WHERE id IN ({placeholders})", ids)
 
-        # 同步清理 qmd 中的文件
-        if count > 0:
-            try:
-                from cc_feishu_bridge.claude.qmd_adapter import get_qmd_adapter
-                adapter = get_qmd_adapter()
-                if adapter.is_available():
-                    for row in rows:
-                        adapter.remove_memory(row[0], project_path)
-            except Exception as e:
-                logger.warning("qmd sync failed for clear project %s: %s", project_path, e)
-        # Invalidate TF-IDF cache for this project
-        self._tfidf_cache.pop(project_path, None)
+        # Invalidate TF-IDF cache（无论 count 是否为 0 都清理）
+        self._invalidate_tfidf_cache(project_path)
         return count

@@ -12,7 +12,7 @@ from cc_feishu_bridge.feishu.client import FeishuClient, IncomingMessage
 from cc_feishu_bridge.security.auth import Authenticator
 from cc_feishu_bridge.security.validator import SecurityValidator
 from cc_feishu_bridge.claude.integration import ClaudeIntegration
-from cc_feishu_bridge.claude.memory_manager import MemoryManager, MEMORY_SYSTEM_GUIDE
+from cc_feishu_bridge.claude.memory_manager import get_memory_manager, MEMORY_SYSTEM_GUIDE
 from cc_feishu_bridge.claude.session_manager import SessionManager
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 from cc_feishu_bridge.format.edit_diff import _DiffMarker
@@ -113,7 +113,7 @@ class MessageHandler:
         self.formatter = formatter
         self.approved_directory = approved_directory
         self.data_dir = data_dir
-        self.memory_manager = MemoryManager()
+        self.memory_manager = get_memory_manager()
         self._queue: asyncio.Queue[IncomingMessage] | None = None
         self._queue_loop_id: int | None = None
         self._worker_task: asyncio.Task | None = None
@@ -220,7 +220,6 @@ class MessageHandler:
 
         memory_context = MEMORY_SYSTEM_GUIDE + self.memory_manager.inject_context(
             user_open_id=message.user_open_id,
-            project_path=self.approved_directory,
         )
         await self._run_query(message, session, sdk_session_id, memory_context)
 
