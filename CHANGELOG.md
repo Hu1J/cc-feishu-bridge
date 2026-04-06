@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.10] - 2026-04-06
+
+### Fixed
+- **`/update` 步骤越界崩溃**：修复重启流程从 4 步改为 5 步后，`/update` 总步骤数未同步更新导致 `list index out of range` 崩溃；步骤总数从 7 改为 8
+
 ## [0.3.9] - 2026-04-06
 
 ### Added
