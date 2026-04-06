@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.11] - 2026-04-06
+
+### Fixed
+- **`memory_manager` `TypeError`**：修复 `get_all_preferences()` 使用 `SELECT *` 时，数据库多余字段导致 `UserPreference` 构造失败的错误
+
+### Changed
+- **文件存储命名**：文件名格式改为 `原文件名_时间戳.后缀`，替换旧格式 `file_时间戳_message_id_文件名.后缀`
+- **文件名保留 Unicode**：修复中文文件名被错误处理的问题，`sanitize_filename` 只移除文件系统真正危险的字符
+- **飞书文件类型映射扩充**：新增 200+ 扩展名映射；`.txt` 从 `"txt"` 改为 `"stream"`（飞书不支持 txt 类型）；未知扩展名默认改为 `stream` 而非 `bin`
+
 ## [0.3.10] - 2026-04-06
 
 ### Fixed
