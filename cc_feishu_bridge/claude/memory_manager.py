@@ -312,7 +312,25 @@ class MemoryManager:
                  _tokenize(f"{mem.title} {mem.content} {mem.keywords}"),
                  _tokenize(mem.keywords))
             )
+        # Sync to qmd for semantic search (non-fatal)
+        self._sync_to_qmd(mem)
         return mem
+
+    def _sync_to_qmd(self, mem: ProjectMemory):
+        """Sync a project memory to qmd (non-fatal)."""
+        try:
+            from cc_feishu_bridge.claude.qmd_adapter import get_qmd_adapter
+            adapter = get_qmd_adapter()
+            if adapter.is_available():
+                adapter.add_memory(
+                    memory_id=mem.id,
+                    title=mem.title,
+                    content=mem.content,
+                    keywords=mem.keywords,
+                    project_path=mem.project_path,
+                )
+        except Exception:
+            pass  # non-fatal, qmd sync failure should not block the operation
 
     def search_project_memories(
         self,
@@ -395,9 +413,16 @@ class MemoryManager:
         content: str,
         keywords: str,
     ) -> bool:
-        """更新一条项目记忆"""
+        """更新一条项目记忆（同步到 qmd）"""
         now = datetime.utcnow().isoformat()
         with sqlite3.connect(self.db_path) as conn:
+            # Get project_path before update for qmd sync
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT project_path FROM project_memories WHERE id = ?", (memory_id,)
+            ).fetchone()
+            proj_path = row["project_path"] if row else ""
+
             affected = conn.execute("""
                 UPDATE project_memories
                 SET title=?, content=?, keywords=?, updated_at=?
@@ -413,15 +438,41 @@ class MemoryManager:
                      _tokenize(f"{title} {content} {keywords}"),
                      _tokenize(keywords))
                 )
+        # Sync to qmd
+        if affected > 0 and proj_path:
+            try:
+                from cc_feishu_bridge.claude.qmd_adapter import get_qmd_adapter
+                adapter = get_qmd_adapter()
+                if adapter.is_available():
+                    adapter.add_memory(memory_id, title, content, keywords, proj_path)
+            except Exception:
+                pass
         return affected > 0
 
     def delete_project_memory(self, memory_id: str) -> bool:
-        """删除一条项目记忆"""
+        """删除一条项目记忆（同步到 qmd）"""
+        # Get project_path before deleting (for qmd sync)
         with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT project_path FROM project_memories WHERE id = ?", (memory_id,)
+            ).fetchone()
+            proj_path = row["project_path"] if row else ""
+
             affected = conn.execute(
                 "DELETE FROM project_memories WHERE id = ?", (memory_id,)
             ).rowcount
             conn.execute("DELETE FROM project_memories_fts WHERE id = ?", (memory_id,))
+
+        # Sync to qmd
+        if affected > 0 and proj_path:
+            try:
+                from cc_feishu_bridge.claude.qmd_adapter import get_qmd_adapter
+                adapter = get_qmd_adapter()
+                if adapter.is_available():
+                    adapter.remove_memory(memory_id, proj_path)
+            except Exception:
+                pass
         return affected > 0
 
     def clear_project_memories(self, project_path: str) -> int:

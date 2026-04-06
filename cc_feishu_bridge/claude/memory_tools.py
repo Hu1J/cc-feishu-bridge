@@ -30,17 +30,18 @@ def _build_memory_mcp_server():
 
     @tool(
         "MemoryAddUser",
-        "新增一条用户偏好（全局共享）。title + content + keywords 三样必填，关键词用逗号分隔。",
-        {"title": str, "content": str, "keywords": str},
+        "新增一条用户偏好（按飞书用户隔离，user_open_id 来自当前会话）。title + content + keywords 三样必填，关键词用逗号分隔。",
+        {"title": str, "content": str, "keywords": str, "user_open_id": str},
     )
     async def memory_add_user(args: dict) -> dict:
         title = args.get("title", "").strip()
         content = args.get("content", "").strip()
         keywords = args.get("keywords", "").strip()
+        user_open_id = args.get("user_open_id", "").strip()
         if not title or not content or not keywords:
             return {"content": [{"type": "text", "text": "title、content、keywords 三样必填"}], "is_error": True}
         mm = MemoryManager()
-        p = mm.add_preference(title, content, keywords)
+        p = mm.add_preference(user_open_id, title, content, keywords)
         return {"content": [{"type": "text", "text": f"✅ 用户偏好已保存\n\n{_fmt_pref(p)}"}]}
 
     @tool(
@@ -74,12 +75,13 @@ def _build_memory_mcp_server():
 
     @tool(
         "MemoryListUser",
-        "列出所有用户偏好（全局共享）。",
-        {},
+        "列出当前用户的所有偏好（按飞书 user_open_id 隔离）。",
+        {"user_open_id": str},
     )
     async def memory_list_user(args: dict) -> dict:
+        user_open_id = args.get("user_open_id", "").strip()
         mm = MemoryManager()
-        prefs = mm.get_all_preferences()
+        prefs = mm.get_preferences_by_user(user_open_id) if user_open_id else mm.get_all_preferences()
         if not prefs:
             return {"content": [{"type": "text", "text": "📭 暂无用户偏好记录。"}]}
         lines = [f"👤 用户偏好（共 {len(prefs)} 条）\n"]
@@ -90,15 +92,16 @@ def _build_memory_mcp_server():
 
     @tool(
         "MemorySearchUser",
-        "搜索用户偏好（全文检索）。全局共享，不按项目隔离。",
-        {"query": str},
+        "搜索用户偏好（全文检索）。按飞书 user_open_id 隔离。",
+        {"query": str, "user_open_id": str},
     )
     async def memory_search_user(args: dict) -> dict:
         query = args.get("query", "").strip()
+        user_open_id = args.get("user_open_id", "").strip()
         if not query:
             return {"content": [{"type": "text", "text": "查询词不能为空"}], "is_error": True}
         mm = MemoryManager()
-        results = mm.search_preferences(query, limit=5)
+        results = mm.search_preferences(query, user_open_id=user_open_id, limit=5)
         if not results:
             return {"content": [{"type": "text", "text": f"未找到与「{query}」相关的用户偏好。"}]}
         lines = [f"🔍 用户偏好搜索结果（共 {len(results)} 条）\n"]
@@ -111,7 +114,7 @@ def _build_memory_mcp_server():
 
     @tool(
         "MemoryAddProj",
-        "新增一条项目记忆（按项目隔离）。title + content + keywords 三样必填，关键词用逗号分隔。",
+        "新增一条项目记忆（语义搜索，按项目隔离）。title + content + keywords 三样必填，关键词用逗号分隔。",
         {"project_path": str, "title": str, "content": str, "keywords": str},
     )
     async def memory_add_proj(args: dict) -> dict:
@@ -129,10 +132,11 @@ def _build_memory_mcp_server():
 
     @tool(
         "MemoryDeleteProj",
-        "删除指定 ID 的项目记忆。",
-        {"id": str},
+        "删除指定 ID 的项目记忆（SQLite + qmd 同步删除）。",
+        {"id": str, "project_path": str},
     )
     async def memory_delete_proj(args: dict) -> dict:
+        project_path = args.get("project_path", "").strip()
         mm = MemoryManager()
         ok = mm.delete_project_memory(args["id"])
         if ok:
@@ -141,7 +145,7 @@ def _build_memory_mcp_server():
 
     @tool(
         "MemoryUpdateProj",
-        "更新指定 ID 的项目记忆。title + content + keywords 三样必填，关键词用逗号分隔。",
+        "更新指定 ID 的项目记忆（语义搜索，按项目隔离）。title + content + keywords 三样必填，关键词用逗号分隔。",
         {"id": str, "title": str, "content": str, "keywords": str},
     )
     async def memory_update_proj(args: dict) -> dict:
@@ -158,18 +162,35 @@ def _build_memory_mcp_server():
 
     @tool(
         "MemoryListProj",
-        "列出指定项目下所有项目记忆（按项目隔离）。",
+        "列出指定项目下所有项目记忆（语义搜索，按项目隔离）。",
         {"project_path": str},
     )
     async def memory_list_proj(args: dict) -> dict:
+        from cc_feishu_bridge.claude.qmd_adapter import get_qmd_adapter
+
         project_path = args.get("project_path", "").strip()
         if not project_path:
             return {"content": [{"type": "text", "text": "project_path 不能为空"}], "is_error": True}
+
+        adapter = get_qmd_adapter()
+        if adapter.is_available():
+            docs = adapter.list_memories(project_path)
+            if not docs:
+                return {"content": [{"type": "text", "text": "📭 暂无项目记忆记录。"}]}
+            lines = [f"📁 项目记忆（共 {len(docs)} 条）\n"]
+            for doc in docs:
+                preview = doc.content[:100].replace("\n", " ")
+                lines.append(f"\n**{doc.title}**")
+                lines.append(f"  {preview}...")
+                lines.append(f"  ID: `{doc.memory_id}`")
+            return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+
+        # Fallback to SQLite
         mm = MemoryManager()
         mems = mm.get_project_memories(project_path)
         if not mems:
-            return {"content": [{"type": "text", "text": "📭 暂无项目记忆记录。"}]}
-        lines = [f"📁 项目记忆（共 {len(mems)} 条）\n"]
+            return {"content": [{"type": "text", "text": "📭 暂无项目记忆记录（qmd 不可用，降级模式）。"}]}
+        lines = [f"📁 项目记忆（共 {len(mems)} 条，降级模式）\n"]
         for m in mems:
             lines.append(_fmt_proj(m))
             lines.append("")
@@ -177,19 +198,31 @@ def _build_memory_mcp_server():
 
     @tool(
         "MemorySearchProj",
-        "搜索项目记忆（全文检索）。按项目隔离，只搜当前项目。",
+        "搜索项目记忆（语义+关键词混合搜索）。按项目隔离，只搜当前项目。",
         {"query": str, "project_path": str},
     )
     async def memory_search_proj(args: dict) -> dict:
+        from cc_feishu_bridge.claude.qmd_adapter import get_qmd_adapter
+
         query = args.get("query", "").strip()
         project_path = args.get("project_path", "").strip()
         if not query or not project_path:
             return {"content": [{"type": "text", "text": "query 和 project_path 不能为空"}], "is_error": True}
+
+        adapter = get_qmd_adapter()
+        if adapter.is_available():
+            docs = adapter.search(query, project_path, limit=5)
+            if not docs:
+                return {"content": [{"type": "text", "text": f"未找到与「{query}」相关的项目记忆。"}]}
+            result_text = adapter.format_results(docs)
+            return {"content": [{"type": "text", "text": f"🔍 项目记忆搜索结果\n\n{result_text}"}]}
+
+        # Fallback to SQLite FTS5
         mm = MemoryManager()
         results = mm.search_project_memories(query, project_path, limit=5)
         if not results:
-            return {"content": [{"type": "text", "text": f"未找到与「{query}」相关的项目记忆。"}]}
-        lines = [f"🔍 项目记忆搜索结果（共 {len(results)} 条）\n"]
+            return {"content": [{"type": "text", "text": f"未找到与「{query}」相关的项目记忆（qmd 不可用，降级关键词搜索也未命中）。"}]}
+        lines = [f"🔍 项目记忆搜索结果（共 {len(results)} 条，降级模式）\n"]
         for r in results:
             lines.append(_fmt_proj(r.memory))
             lines.append("")
