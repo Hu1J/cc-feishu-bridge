@@ -52,10 +52,10 @@ def test_memory_manager_syncs_to_qmd():
         proj = "/tmp/test-sync-proj"
         mem = mm.add_project_memory(proj, "SyncTest", "Sync content here", "sync")
 
-        # Verify synced to qmd
+        # Verify synced to qmd (BM25 order may vary; check it appears somewhere)
         docs = adapter.search("SyncTest", project_path=proj)
         assert len(docs) >= 1
-        assert docs[0].memory_id == mem.id
+        assert any(doc.memory_id == mem.id for doc in docs)
 
         # Clean up
         mm.delete_project_memory(mem.id)

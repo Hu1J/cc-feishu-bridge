@@ -270,64 +270,41 @@ class QmdAdapter:
 
     def search(self, query: str, project_path: str, limit: int = 5) -> list[QmdDoc]:
         """
-        Hybrid search via qmd, filtered to one project.
-        Returns list of QmdDoc sorted by relevance score (desc).
+        Search via qmd FTS5 BM25 (no vector model needed).
+        Falls back to empty list on any error.
         """
         if not self.is_available():
             return []
-
         try:
-            proj_hash = _proj_hash(project_path)
-            result = self._qmd([
-                "query", query,
-                "--collection", QMD_COLLECTION,
-                "--format", "json",
-                "--full",
-                "--limit", str(limit * 3),
-            ], timeout=60)
-            if result.returncode != 0:
-                logger.warning("qmd search failed: %s", result.stderr.strip())
-                return []
-
-            items = json.loads(result.stdout) if result.stdout.strip() else []
+            import sqlite3
+            from qmd.core.db import Database
+            from qmd.core.retrieval import bm25_search
+            conn = sqlite3.connect(str(QMD_INDEX_PATH))
+            conn.row_factory = sqlite3.Row
+            db = Database(conn)
+            results = bm25_search(db, query, collection=QMD_COLLECTION, limit=limit * 3)
             docs = []
-            for item in items:
-                file_rel = item.get("file", "")
-                parts = file_rel.split("/")
-                # Filter: must be in our collection and correct project hash dir
-                if len(parts) < 3 or parts[0] != QMD_COLLECTION or parts[1] != proj_hash:
+            proj_hash = _proj_hash(project_path)
+            for r in results:
+                parts = r.file.split("/")
+                # Filter by project hash directory
+                if len(parts) < 2 or parts[0] != QMD_COLLECTION or parts[1] != proj_hash:
                     continue
-
                 fname = parts[-1]
                 if not fname.endswith(".md"):
                     continue
                 mem_id = fname[:-3]
-                body = item.get("body") or item.get("snippet") or ""
-
-                # Extract title from first # heading if not provided
-                title = item.get("title", "")
-                if not title and body:
-                    for line in body.split("\n"):
-                        if line.startswith("# "):
-                            title = line[2:].strip()
-                            break
-
                 docs.append(QmdDoc(
                     memory_id=mem_id,
                     project_path=project_path,
-                    title=title or mem_id,
-                    content=body,
-                    keywords=_extract_keywords(body),
-                    score=float(item.get("score", 0.0)),
+                    title=r.title or mem_id,
+                    content=r.body or "",
+                    keywords=_extract_keywords(r.body or ""),
+                    score=float(r.score),
                 ))
-
                 if len(docs) >= limit:
                     break
-
             return docs
-        except subprocess.TimeoutExpired:
-            logger.warning("qmd search timed out")
-            return []
         except Exception as e:
             logger.warning("qmd search failed: %s", e)
             return []

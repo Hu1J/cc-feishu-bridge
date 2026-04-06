@@ -1,8 +1,9 @@
-"""Local memory store with SQLite FTS5 for Claude Code bridge."""
+"""Local memory store with SQLite FTS5 + TF-IDF cosine for Claude Code bridge."""
 from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,6 +13,15 @@ from typing import Optional
 import jieba
 
 logger = logging.getLogger(__name__)
+
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+    HAS_SKLEARN = True
+except Exception:
+    HAS_SKLEARN = False
+    cosine_similarity = None
+    TfidfVectorizer = None
 
 
 def _tokenize(text: str) -> str:
@@ -80,6 +90,9 @@ class MemoryManager:
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        # TF-IDF 向量缓存（按 project_path 分组，线程安全）
+        self._tfidf_cache: dict = {}
+        self._tfidf_lock = threading.Lock()
 
     def _init_db(self):
         """创建/升级数据库：新建表或迁移已有表"""
@@ -328,6 +341,8 @@ class MemoryManager:
             )
         # Sync to qmd for semantic search (non-fatal)
         self._sync_to_qmd(mem)
+        # Invalidate TF-IDF cache for this project
+        self._tfidf_cache.pop(project_path, None)
         return mem
 
     def _sync_to_qmd(self, mem: ProjectMemory):
@@ -353,16 +368,32 @@ class MemoryManager:
         limit: int = 5,
     ) -> list[MemorySearchResult]:
         """
-        按项目搜索项目记忆：keywords 优先（前缀匹配），无结果再搜 title + content。
+        两层检索策略：
+        1. TF-IDF cosine — 语义相似度（jieba 分词 + sklearn，离线计算）
+        2. FTS5 BM25 — 精确关键词补底
         """
         if not query.strip() or not project_path:
             return []
+
+        # 第一层：TF-IDF cosine 语义搜索
+        tfidf_results = self._search_tfidf(query, project_path, limit)
+        if tfidf_results:
+            return tfidf_results
+
+        # 第二层：FTS5 BM25 精确补底
+        return self._search_fts5(query, project_path, limit)
+
+    def _search_fts5(
+        self, query: str, project_path: str, limit: int,
+    ) -> list[MemorySearchResult]:
+        """FTS5 BM25 精确关键词搜索"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            # 按 keywords 分词匹配（兼容中文前缀匹配）
             keywords_query = _tokenize(query)
-            rows = conn.execute(f"""
-                SELECT m.*, bm25(project_memories_fts) as rank
+            rows = conn.execute("""
+                SELECT m.id, m.project_path, m.title, m.content, m.keywords,
+                       m.created_at, m.updated_at,
+                       bm25(project_memories_fts) as rank
                 FROM project_memories_fts
                 JOIN project_memories m ON project_memories_fts.id = m.id
                 WHERE project_memories_fts MATCH ?
@@ -383,6 +414,73 @@ class MemoryManager:
             )
             results.append(MemorySearchResult(memory=mem, rank=row["rank"]))
         return results
+
+    def _search_tfidf(
+        self, query: str, project_path: str, limit: int,
+    ) -> list[MemorySearchResult]:
+        """TF-IDF cosine 语义搜索（sklearn 离线计算，无需网络）"""
+        if not HAS_SKLEARN or cosine_similarity is None:
+            return []
+
+        try:
+            vectorizer, matrix, memories = self._get_tfidf_cache(project_path)
+        except Exception:
+            return []
+
+        if not memories:
+            return []
+
+        try:
+            q_vec = vectorizer.transform([query])
+            scores = cosine_similarity(q_vec, matrix).flatten()
+            # 只取 score > 0.05 的结果
+            filtered = [(i, float(scores[i])) for i in range(len(scores)) if scores[i] > 0.05]
+            filtered.sort(key=lambda x: x[1], reverse=True)
+            return [
+                MemorySearchResult(memory=memories[i], rank=score)
+                for i, score in filtered[:limit]
+            ]
+        except Exception:
+            return []
+
+    def _get_tfidf_cache(self, project_path: str) -> tuple:
+        """获取或构建某项目的 TF-IDF 缓存（线程安全）"""
+        with self._tfidf_lock:
+            if project_path in self._tfidf_cache:
+                return self._tfidf_cache[project_path]
+
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT id, project_path, title, content, keywords, "
+                    "created_at, updated_at FROM project_memories WHERE project_path = ?",
+                    (project_path,),
+                ).fetchall()
+
+            if not rows:
+                self._tfidf_cache[project_path] = (None, None, [])
+                return self._tfidf_cache[project_path]
+
+            memories = [
+                ProjectMemory(
+                    id=r["id"], project_path=r["project_path"],
+                    title=r["title"], content=r["content"],
+                    keywords=r["keywords"],
+                    created_at=r["created_at"], updated_at=r["updated_at"],
+                )
+                for r in rows
+            ]
+
+            texts = [m.title + " " + m.content + " " + m.keywords for m in memories]
+
+            def tokenizer(t):
+                return " ".join(jieba.cut(t)).split()
+
+            vectorizer = TfidfVectorizer(tokenizer=tokenizer)
+            matrix = vectorizer.fit_transform(texts)
+
+            self._tfidf_cache[project_path] = (vectorizer, matrix, memories)
+            return self._tfidf_cache[project_path]
 
     def get_project_memories(self, project_path: str) -> list[ProjectMemory]:
         """列出某项目下所有记忆（按创建时间倒序）"""
@@ -450,6 +548,9 @@ class MemoryManager:
                     adapter.add_memory(memory_id, title, content, keywords, proj_path)
             except Exception as e:
                 logger.warning("qmd sync failed for update memory %s: %s", memory_id, e)
+        # Invalidate TF-IDF cache for this project
+        if proj_path:
+            self._tfidf_cache.pop(proj_path, None)
         return affected > 0
 
     def delete_project_memory(self, memory_id: str) -> bool:
@@ -476,6 +577,9 @@ class MemoryManager:
                     adapter.remove_memory(memory_id, proj_path)
             except Exception as e:
                 logger.warning("qmd sync failed for delete memory %s: %s", memory_id, e)
+        # Invalidate TF-IDF cache for this project
+        if proj_path:
+            self._tfidf_cache.pop(proj_path, None)
         return affected > 0
 
     def clear_project_memories(self, project_path: str) -> int:
@@ -505,4 +609,6 @@ class MemoryManager:
                         adapter.remove_memory(row[0], project_path)
             except Exception as e:
                 logger.warning("qmd sync failed for clear project %s: %s", project_path, e)
+        # Invalidate TF-IDF cache for this project
+        self._tfidf_cache.pop(project_path, None)
         return count
