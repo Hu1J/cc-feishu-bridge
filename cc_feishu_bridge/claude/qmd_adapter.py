@@ -33,8 +33,8 @@ QMD_COLLECTION = "project_memories"
 
 
 def _proj_hash(project_path: str) -> str:
-    """MD5 hash prefix (8 chars) for project isolation in file paths."""
-    return hashlib.md5(project_path.encode()).hexdigest()[:8]
+    """MD5 hash prefix (16 chars / 64 bits) for project isolation in file paths. 10万项目碰撞概率 < 0.0004%"""
+    return hashlib.md5(project_path.encode()).hexdigest()[:16]
 
 
 def _mem_file_path(project_path: str, memory_id: str) -> Path:

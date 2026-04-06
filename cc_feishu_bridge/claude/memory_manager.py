@@ -379,7 +379,8 @@ class MemoryManager:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute("""
-                SELECT * FROM project_memories
+                SELECT id, project_path, title, content, keywords, created_at, updated_at
+                FROM project_memories
                 WHERE project_path = ?
                 ORDER BY created_at DESC
             """, (project_path,)).fetchall()
@@ -474,10 +475,13 @@ class MemoryManager:
                 "SELECT id FROM project_memories WHERE project_path = ?",
                 (project_path,)
             ).fetchall()
-            count = len(rows)
+            ids = [row[0] for row in rows]
+            count = len(ids)
+            if count == 0:
+                return 0
+            placeholders = ",".join("?" * len(ids))
             conn.execute("DELETE FROM project_memories WHERE project_path = ?", (project_path,))
-            conn.execute("DELETE FROM project_memories_fts WHERE id IN "
-                         "(SELECT id FROM project_memories WHERE project_path = ?)", (project_path,))
+            conn.execute(f"DELETE FROM project_memories_fts WHERE id IN ({placeholders})", ids)
 
         # 同步清理 qmd 中的文件
         if count > 0:
@@ -486,7 +490,7 @@ class MemoryManager:
                 adapter = get_qmd_adapter()
                 if adapter.is_available():
                     for row in rows:
-                        adapter.remove_memory(row["id"], project_path)
+                        adapter.remove_memory(row[0], project_path)
             except Exception:
                 pass  # non-fatal
         return count
