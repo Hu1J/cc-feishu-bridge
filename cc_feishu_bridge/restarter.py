@@ -20,16 +20,18 @@ class StartupTimeoutError(RestartError): pass
 # Step labels for CLI display (short, single line)
 _CLI_STEP_LABELS = [
     "准备重启",
-    "启动新 bridge",
-    "等待新进程就绪",
+    "清理文件锁",
+    "启动新实例",
+    "检查新实例",
     "重启完成",
 ]
 
 # Step labels for Feishu messages (detailed, emoji)
 _FEISHU_STEP_LABELS = [
     "🛑 准备重启",
-    "🚀 启动新 bridge",
-    "⏳ 等待新进程就绪",
+    "🧹 清理文件锁",
+    "🚀 启动新实例",
+    "🔍 检查新实例",
     "✅ 重启完成",
 ]
 
@@ -37,8 +39,8 @@ _FEISHU_STEP_LABELS = [
 @dataclass
 class RestartStep:
     """A single step in the restart process, yielded as it happens."""
-    step: int          # 1–4
-    total: int         # always 4
+    step: int          # 1–5
+    total: int         # always 5
     label: str         # short label shown to user
     status: str        # "done" | "error" | "final"
     detail: str = ""   # extra info (PID, path, etc.)
@@ -120,26 +122,39 @@ def _restart_to(file_lock=None):
     Args:
         file_lock: FileLock object acquired by main.py; released before
                    starting new process so the new instance can acquire it.
-    Yields RestartStep objects (4 steps total).
+    Yields RestartStep objects (5 steps total).
     """
-    # Step 1: 准备重启
-    yield RestartStep(step=1, total=4, label=_CLI_STEP_LABELS[0], status="done")
+    current_path = os.getcwd()
+    data_dir = os.path.join(current_path, ".cc-feishu-bridge")
+    pid_file = os.path.join(data_dir, "cc-feishu-bridge.pid")
+    instance_lock = os.path.join(data_dir, ".instance.lock")
 
-    # Step 2: 释放 FileLock（如果有），然后启动新进程
+    # Step 1: 准备重启
+    yield RestartStep(step=1, total=5, label=_CLI_STEP_LABELS[0], status="done")
+
+    # Step 2: 释放文件锁 + 删除 pid 文件
     if file_lock is not None:
         file_lock.release()
+    Path(pid_file).unlink(missing_ok=True)
 
-    # Yield "启动新 bridge" before starting so the step label is shown before waiting
-    yield RestartStep(step=2, total=4, label=_CLI_STEP_LABELS[1], status="done")
+    # 检查确认两个文件都没了
+    if os.path.exists(pid_file) or os.path.exists(instance_lock):
+        raise RestartError("文件锁/pid 文件未成功清理，无法重启")
 
-    new_pid = _start_bridge(os.getcwd())
+    yield RestartStep(step=2, total=5, label=_CLI_STEP_LABELS[1], status="done")
 
-    # Step 3: 等待新进程就绪（_start_bridge already waits for pid file, so this step is immediate）
-    yield RestartStep(step=3, total=4, label=_CLI_STEP_LABELS[2], status="done")
+    # Step 3: 启动新实例
+    new_pid = _start_bridge(current_path)
+    yield RestartStep(step=3, total=5, label=_CLI_STEP_LABELS[2], status="done")
 
-    # Step 4: 重启完成
+    # Step 4: 检查新实例已成功启动（pid 文件 + filelock 都存在）
+    if not (os.path.exists(pid_file) and os.path.exists(instance_lock)):
+        raise StartupTimeoutError("新实例未成功启动")
+    yield RestartStep(step=4, total=5, label=_CLI_STEP_LABELS[3], status="done")
+
+    # Step 5: 重启完成（自我 exit 由调用方处理，消息不展示）
     yield RestartStep(
-        step=4, total=4, label=_CLI_STEP_LABELS[3],
+        step=5, total=5, label=_CLI_STEP_LABELS[4],
         status="final", detail=f"新 PID {new_pid}",
         success=True, new_pid=new_pid,
     )
@@ -152,7 +167,7 @@ async def run_restart(file_lock, feishu: "FeishuClient",
     Sends a rich progress card to Feishu, updating it as each step completes.
     """
     current_path = os.getcwd()
-    total = 4
+    total = 5
 
     for step_obj in _restart_to(file_lock=file_lock):
         bar = "▓" * step_obj.step + "░" * (total - step_obj.step)
@@ -203,7 +218,7 @@ def run_restart_cli(file_lock, feishu=None, chat_id: str | None = None):
         await _send(initial)
 
         for step_obj in _restart_to(file_lock=file_lock):
-            bar = "▓" * step_obj.step + "░" * (4 - step_obj.step)
+            bar = "▓" * step_obj.step + "░" * (5 - step_obj.step)
             label = _FEISHU_STEP_LABELS[step_obj.step - 1]
 
             if step_obj.status == "final":
@@ -217,7 +232,7 @@ def run_restart_cli(file_lock, feishu=None, chat_id: str | None = None):
             else:
                 card = (
                     f"## 🔄 正在重启\n\n"
-                    f"{bar} `{step_obj.step}/4` {label}\n\n"
+                    f"{bar} `{step_obj.step}/5` {label}\n\n"
                     f"⏳ 即将重启，请稍候..."
                 )
                 await _send(card)
@@ -242,15 +257,14 @@ def _start_bridge(project_path: str, timeout: float = 8.0) -> int:
 
     Returns the PID of the started process.
     Raises StartupTimeoutError if pid file doesn't appear within timeout.
+
+    Note: caller is responsible for cleaning up stale pid/lock files before calling.
     """
     pid_file = _pid_file_path(project_path)
-
-    # Remove stale pid file if exists
-    Path(pid_file).unlink(missing_ok=True)
+    project_cc = os.path.join(project_path, ".cc-feishu-bridge")
 
     # Start bridge via the installed binary (works for both pip installs and
     # PyInstaller binaries — cc-feishu-bridge is in PATH in both cases)
-    project_cc = os.path.join(project_path, ".cc-feishu-bridge")
     stdout_log = open(os.path.join(project_cc, "bridge-stdout.log"), "w")
     stderr_log = open(os.path.join(project_cc, "bridge-stderr.log"), "w")
     try:

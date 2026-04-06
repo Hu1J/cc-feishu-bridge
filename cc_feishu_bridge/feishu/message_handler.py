@@ -238,6 +238,7 @@ class MessageHandler:
             )
 
         elif cmd == "/status":
+            import os
             from cc_feishu_bridge import __version__
             session = self.sessions.get_active_session(message.user_open_id)
             if not session:
@@ -250,6 +251,7 @@ class MessageHandler:
                 response_text=(
                     f"📊 会话状态\n"
                     f"版本: {__version__}\n"
+                    f"PID: {os.getpid()}\n"
                     f"会话ID: {session.session_id}\n"
                     f"消息数: {session.message_count}\n"
                     f"累计费用: ${session.total_cost:.4f}\n"

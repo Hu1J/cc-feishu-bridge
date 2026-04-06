@@ -4,7 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.3.8] - 2026-04-06
+## [0.3.9] - 2026-04-06
+
+### Added
+- **`/status` 显示 PID**：`/status` 新增展示当前 bridge 进程的 PID，便于排查
+
+### Changed
+- **重启流程重构**：从 4 步改为 5 步（准备重启 → 清理文件锁 → 启动新实例 → 检查新实例 → 重启完成），增加 pid 文件和 filelock 双重验证，确保旧进程彻底退出
 
 ## [0.3.8] - 2026-04-06
 
