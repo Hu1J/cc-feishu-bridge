@@ -30,3 +30,65 @@ def test_guess_file_type_stream():
     """未知类型默认 stream"""
     from cc_feishu_bridge.feishu.media import guess_file_type
     assert guess_file_type(".xyz") == "stream"
+
+
+def test_feishu_send_file_no_files():
+    """未提供文件时返回错误"""
+    # Clear cached modules to ensure fresh import with patches active
+    for key in list(sys.modules.keys()):
+        if 'cc_feishu_bridge' in key or 'claude_agent_sdk' in key:
+            del sys.modules[key]
+
+    with patch("claude_agent_sdk.create_sdk_mcp_server") as mock_create, \
+         patch("cc_feishu_bridge.claude.feishu_file_tools._get_chat_id", return_value=None):
+        from cc_feishu_bridge.claude import feishu_file_tools
+
+        feishu_file_tools._mcp_server = None
+
+        # capture_server receives the real SdkMcpTool (the result of @tool decorator)
+        def capture_server(**kwargs):
+            real_tool = kwargs["tools"][0]
+            # Return a mock server whose .tools[0].fn is the real handler
+            mock_tool = MagicMock()
+            mock_tool.fn = real_tool.handler
+            return MagicMock(tools=[mock_tool])
+
+        mock_create.side_effect = capture_server
+
+        import asyncio
+        server = feishu_file_tools.get_feishu_file_mcp_server()
+        tool_fn = server.tools[0]
+        result = asyncio.get_event_loop().run_until_complete(
+            tool_fn.fn({"file_paths": []})
+        )
+        assert result["is_error"] is True
+        assert "未提供文件路径" in result["content"][0]["text"]
+
+
+def test_feishu_send_file_no_chat_id():
+    """无活跃会话时返回错误"""
+    for key in list(sys.modules.keys()):
+        if 'cc_feishu_bridge' in key or 'claude_agent_sdk' in key:
+            del sys.modules[key]
+
+    with patch("claude_agent_sdk.create_sdk_mcp_server") as mock_create, \
+         patch("cc_feishu_bridge.claude.feishu_file_tools._get_chat_id", return_value=None):
+        from cc_feishu_bridge.claude import feishu_file_tools
+        feishu_file_tools._mcp_server = None
+
+        def capture_server(**kwargs):
+            real_tool = kwargs["tools"][0]
+            mock_tool = MagicMock()
+            mock_tool.fn = real_tool.handler
+            return MagicMock(tools=[mock_tool])
+
+        mock_create.side_effect = capture_server
+
+        import asyncio
+        server = feishu_file_tools.get_feishu_file_mcp_server()
+        tool_fn = server.tools[0]
+        result = asyncio.get_event_loop().run_until_complete(
+            tool_fn.fn({"file_paths": ["/tmp/nonexistent.png"]})
+        )
+        assert result["is_error"] is True
+        assert "未找到活跃飞书会话" in result["content"][0]["text"]
