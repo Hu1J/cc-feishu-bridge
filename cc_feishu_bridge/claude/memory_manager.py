@@ -325,6 +325,9 @@ class MemoryManager:
     ) -> str:
         """
         注入指定用户的偏好到 prompt（按 user_open_id 过滤，全量返回）。
+
+        返回值末尾带版号标记：__PREFS_VERSION:timestamp__
+        偏好更新后 updated_at 变化，版号随之变化，使 CC 下一条消息自动获取最新偏好。
         """
         prefs = self.get_preferences_by_user(user_open_id)
         if not prefs:
@@ -334,6 +337,9 @@ class MemoryManager:
             lines.append(f"**{p.title}**")
             lines.append(f"{p.content}")
             lines.append("")
+        # 版号：所有偏好中最新的 updated_at，偏好变更后此值必变
+        latest = max(p.updated_at for p in prefs if p.updated_at)
+        lines.append(f"\n__PREFS_VERSION:{latest}__")
         return "\n".join(lines)
 
     # ── 项目记忆 ───────────────────────────────────────────────────────────────

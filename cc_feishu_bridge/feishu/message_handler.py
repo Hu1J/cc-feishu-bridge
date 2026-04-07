@@ -220,12 +220,11 @@ class MessageHandler:
 
         project_path = session.project_path if session else self.approved_directory
         self._current_project_path = project_path  # 供 stream_callback 使用
-        memory_context = (
+        system_prompt_append = (
             MEMORY_SYSTEM_GUIDE
-            + f"\n当前项目路径: {project_path}\n"
             + self.memory_manager.inject_context(user_open_id=message.user_open_id)
         )
-        await self._run_query(message, session, sdk_session_id, memory_context)
+        await self._run_query(message, session, sdk_session_id, system_prompt_append)
 
     async def _handle_command(self, message: IncomingMessage) -> HandlerResult:
         """Handle slash commands like /new, /status."""
@@ -695,7 +694,7 @@ class MessageHandler:
         message: IncomingMessage,
         session,
         sdk_session_id: str | None,
-        memory_context: str | None = None,
+        system_prompt_append: str | None = None,
     ) -> None:
         """Run Claude query in background, send results to Feishu on completion."""
         reaction_id = None
@@ -875,7 +874,7 @@ class MessageHandler:
                 session_id=sdk_session_id,
                 cwd=session.project_path if session else self.approved_directory,
                 on_stream=stream_callback,
-                memory_context=memory_context,
+                system_prompt_append=system_prompt_append,
             )
 
             # Flush any remaining buffered text
