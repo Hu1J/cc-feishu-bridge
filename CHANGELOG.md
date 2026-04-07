@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.14] - 2026-04-07
+
+### Added
+- **FeishuSendFile MCP 工具**：新增 `FeishuSendFile(file_paths: list[str])` MCP 工具，CC 在飞书对话中可直接调用发送文件/图片，自动判断文件类型（图片直接发送，其他文件先上传再发送），支持多文件并发
+- **FEISHU_FILE_GUIDE**：飞书文件发送引导词注入 system prompt，CC 知道在用户要求发送文件时调用该工具
+- **相对路径解析**：发送文件时自动尝试将相对路径解析为绝对路径（优先从 approved_directory 查找，兜底当前工作目录）
+
+### Fixed
+- **相对路径无法发送**：之前 CC 传相对路径时文件找不到，现在会自动解析
+
 ## [0.3.13] - 2026-04-07
 
 ### Added
