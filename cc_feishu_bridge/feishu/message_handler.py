@@ -1013,17 +1013,21 @@ class MessageHandler:
         # %cI = ISO 8601，无空格，split 不易错位
         log_lines = run_git(["log", "--format=%cI %h %s", "-5"]).splitlines()
 
-        # emoji 状态映射（font 标签在卡片内不稳定，改用 emoji）
-        status_icon = {
-            "M": "📝", "D": "🗑️", "A": "➕",
-            "R": "📛", "U": "⚠️", "?": "❓",
+        # git status 颜色映射（对应标准 git output 配色）
+        STATUS_COLOR = {
+            "M": '<font color="orangered">M</font>',    # 修改（staged）
+            "D": '<font color="red">D</font>',           # 删除（staged）
+            "A": '<font color="green">A</font>',         # 新增（staged）
+            "R": '<font color="purple">R</font>',       # 重命名
+            "U": '<font color="magenta">U</font>',     # 未合并
+            "?": '<font color="gray">??</font>',         # 未跟踪
         }
 
         # 构建单条 markdown 内容
         card_lines = [
-            f"📊 **Git Status - {branch}**",
+            f"**Git Status - {branch}**",
             "",
-            "📝 **变更文件**",
+            "**变更文件**",
         ]
 
         has_changes = bool(status_output)
@@ -1031,21 +1035,32 @@ class MessageHandler:
             for line in status_output.splitlines():
                 idx_char = line[0]
                 wt_char = line[1]
+
+                # 双字符：index status + working tree status
                 if idx_char == "?":
-                    char = "?"
-                elif idx_char == " ":
-                    char = wt_char if wt_char != " " else "?"
+                    # 未跟踪文件: ??
+                    tag = STATUS_COLOR["?"]
+                    card_lines.append(f"{tag}  {line[3:]}")
+                elif idx_char == " " and wt_char != " ":
+                    # 工作区变更（未暂存）: 如 M  → " M"
+                    tag = STATUS_COLOR.get(wt_char, '<font color="orangered">?</font>')
+                    card_lines.append(f"{tag}  {line[3:]}")
+                elif idx_char != " " and wt_char != " ":
+                    # 双字符变更: MM, MD, AM 等
+                    idx_tag = STATUS_COLOR.get(idx_char, '<font color="orangered">?</font>')
+                    wt_tag = STATUS_COLOR.get(wt_char, '<font color="orangered">?</font>')
+                    card_lines.append(f"{idx_tag}{wt_tag}  {line[3:]}")
                 else:
-                    char = idx_char
-                icon = status_icon.get(char, "•")
-                card_lines.append(f"{icon}  {line[3:]}")
+                    # 已暂存变更: 如 A , M , D
+                    tag = STATUS_COLOR.get(idx_char, '<font color="orangered">?</font>')
+                    card_lines.append(f"{tag}   {line[3:]}")
         else:
-            card_lines.append("✅ 工作区干净，无待提交变更")
+            card_lines.append("<font color=\"green\">✓</font> 工作区干净，无待提交变更")
 
         # 最近提交始终显示
         card_lines.extend([
             "",
-            "📋 **最近提交**",
+            "**最近提交**",
             "",
             "| 时间 | Hash | 描述 |",
             "|------|------|------|",
