@@ -136,6 +136,19 @@ class FeishuClient:
             )
         return self._client
 
+    async def get_bot_open_id(self) -> str:
+        """Get this bot's open_id from the Bot Info API."""
+        import lark_oapi as lark
+        client = self._get_client()
+        request = lark.im.v1.GetBotInfoRequest.builder().build()
+        try:
+            response = await asyncio.to_thread(client.im.v1.bot_info.get, request)
+            if response.success():
+                return response.data.bot.open_id or ""
+        except Exception:
+            pass
+        return ""
+
     async def send_text(self, chat_id: str, text: str) -> str:
         """Send a text message to a chat. Returns message_id."""
         import json

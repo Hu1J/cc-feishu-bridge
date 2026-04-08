@@ -13,6 +13,7 @@ from cc_feishu_bridge.security.auth import Authenticator
 from cc_feishu_bridge.security.validator import SecurityValidator
 from cc_feishu_bridge.claude.chat_lock import ChatLockManager
 from cc_feishu_bridge.claude.integration import ClaudeIntegration
+from cc_feishu_bridge.claude.integration_pool import ClaudeIntegrationPool
 from cc_feishu_bridge.claude.memory_manager import get_memory_manager, MEMORY_SYSTEM_GUIDE
 from cc_feishu_bridge.claude.feishu_file_tools import FEISHU_FILE_GUIDE
 from cc_feishu_bridge.claude.session_manager import SessionManager
@@ -102,7 +103,7 @@ class MessageHandler:
         feishu_client: FeishuClient,
         authenticator: Authenticator,
         validator: SecurityValidator,
-        claude: ClaudeIntegration,
+        claude: ClaudeIntegration | ClaudeIntegrationPool,
         session_manager: SessionManager,
         formatter: ReplyFormatter,
         approved_directory: str,
@@ -128,6 +129,10 @@ class MessageHandler:
         self._is_processing: bool = False  # True while worker is running or about to run
         self._current_message_id: str = ""
         self._current_session_key: str | None = None
+        # Fetch bot_open_id at startup for mention-mode detection
+        self._bot_open_id: str = asyncio.get_event_loop().run_until_complete(
+            feishu_client.get_bot_open_id()
+        )
         self._active_integration: ClaudeIntegration | None = None
 
     def _get_queue(self) -> asyncio.Queue[IncomingMessage]:
@@ -224,7 +229,7 @@ class MessageHandler:
         #         return
 
         # should_respond check
-        bot_open_id = ""  # TODO: fetch from feishu_client after init
+        bot_open_id = self._bot_open_id
         if self.config and not should_respond(message, self.config, bot_open_id):
             logger.debug(f"Ignoring message: not @mentioned or chat_mode=mention")
             return
@@ -922,7 +927,7 @@ class MessageHandler:
                 # Text messages: prepend prefix to actual text content
                 full_prompt = (prefix + message.content).strip()
             # Get integration from pool (if claude is a pool) or use claude directly
-            integration = self.claude.get(session_key) if hasattr(self.claude, 'get') and session_key else self.claude
+            integration = await self.claude.get(session_key) if isinstance(self.claude, ClaudeIntegrationPool) and session_key else self.claude
             self._active_integration = integration
             response, new_session_id, cost = await integration.query(
                 prompt=full_prompt,
