@@ -149,6 +149,9 @@ class FeishuWSClient:
                 if sender_id is not None:
                     user_open_id = getattr(sender_id, "open_id", "")
 
+                # 解析 chat_type（p2p 或 group）
+                chat_type = getattr(event_data, "chat_type", "p2p") or "p2p"
+
                 incoming = IncomingMessage(
                     message_id=getattr(message, "message_id", ""),
                     chat_id=getattr(message, "chat_id", ""),
@@ -159,6 +162,7 @@ class FeishuWSClient:
                     parent_id=getattr(message, "parent_id", ""),
                     thread_id=getattr(message, "thread_id", ""),
                     raw_content=content_str,
+                    chat_type=chat_type,
                 )
                 logger.info(f"Received message from {user_open_id}: type={msg_type!r} parent_id={getattr(message, 'parent_id', '')!r} raw_content={content_str!r}")
                 try:

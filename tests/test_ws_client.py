@@ -57,3 +57,70 @@ def test_on_message_callback():
     assert msg.content == "hello"
     assert msg.parent_id == "om_parent_456"
     assert msg.thread_id == "om_thread_789"
+
+
+def test_group_message_has_chat_type():
+    """Group messages should have chat_type='group'."""
+    import json
+    from unittest.mock import MagicMock
+    from cc_feishu_bridge.feishu.ws_client import FeishuWSClient
+
+    event = MagicMock()
+    event.event = MagicMock()
+    event.event.message = MagicMock()
+    event.event.message.message_id = "msg_group"
+    event.event.message.chat_id = "och_group_chat"
+    event.event.message.msg_type = "text"
+    event.event.message.content = json.dumps({"text": "hello group"})
+    event.event.message.create_time = "1234567890"
+    event.event.message.parent_id = ""
+    event.event.message.thread_id = ""
+    event.event.sender = MagicMock()
+    event.event.sender.sender_id = MagicMock()
+    event.event.sender.sender_id.open_id = "ou_user2"
+    event.event.chat_type = "group"
+
+    result = []
+    async def capture(msg):
+        result.append(msg)
+
+    client = FeishuWSClient("app_id", "app_secret", on_message=capture)
+    handler = client._build_event_handler()
+    p2p_handler = handler._processorMap.get("p2.im.message.receive_v1")
+    p2p_handler.f(event)
+
+    assert result[0].chat_type == "group"
+    assert result[0].user_open_id == "ou_user2"
+
+
+def test_p2p_message_has_chat_type():
+    """P2P messages should have chat_type='p2p'."""
+    import json
+    from unittest.mock import MagicMock
+    from cc_feishu_bridge.feishu.ws_client import FeishuWSClient
+
+    event = MagicMock()
+    event.event = MagicMock()
+    event.event.message = MagicMock()
+    event.event.message.message_id = "msg_p2p"
+    event.event.message.chat_id = "och_p2p_chat"
+    event.event.message.msg_type = "text"
+    event.event.message.content = json.dumps({"text": "hello"})
+    event.event.message.create_time = "1234567890"
+    event.event.message.parent_id = ""
+    event.event.message.thread_id = ""
+    event.event.sender = MagicMock()
+    event.event.sender.sender_id = MagicMock()
+    event.event.sender.sender_id.open_id = "ou_user1"
+    event.event.chat_type = "p2p"
+
+    result = []
+    async def capture(msg):
+        result.append(msg)
+
+    client = FeishuWSClient("app_id", "app_secret", on_message=capture)
+    handler = client._build_event_handler()
+    p2p_handler = handler._processorMap.get("p2.im.message.receive_v1")
+    p2p_handler.f(event)
+
+    assert result[0].chat_type == "p2p"

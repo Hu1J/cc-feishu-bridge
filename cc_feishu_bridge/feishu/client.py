@@ -107,6 +107,7 @@ class IncomingMessage:
     parent_id: str = ""    # 被引用消息的 ID（用户引用/回复某条消息时）
     thread_id: str = ""    # 所在线程的 ID
     raw_content: str = ""  # 原始 JSON 字符串（用于调试和记忆增强）
+    chat_type: str = "p2p"  # "p2p" 或 "group"
 
 
 class FeishuClient:
