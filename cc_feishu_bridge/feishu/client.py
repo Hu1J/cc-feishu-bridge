@@ -146,7 +146,7 @@ class FeishuClient:
             if response.success():
                 return response.data.bot.open_id or ""
         except Exception:
-            pass
+            logger.warning(f"get_bot_open_id() failed: {e}")
         return ""
 
     async def send_text(self, chat_id: str, text: str) -> str:

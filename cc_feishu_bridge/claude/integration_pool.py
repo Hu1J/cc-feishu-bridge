@@ -37,6 +37,12 @@ class ClaudeIntegrationPool:
     def _ensure_capacity_unlocked(self) -> None:
         """Must be called with self._lock held. Evict oldest if at capacity."""
         if self._max_size <= 0:
+            # Unlimited mode — warn if pool grows large (potential memory leak)
+            if len(self._pool) >= 100:
+                logger.warning(
+                    f"IntegrationPool has {len(self._pool)} open sessions "
+                    f"(unlimited mode). Consider setting max_size to prevent unbounded growth."
+                )
             return  # unlimited
         if len(self._pool) < self._max_size:
             return
