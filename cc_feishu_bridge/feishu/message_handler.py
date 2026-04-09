@@ -359,7 +359,7 @@ class MessageHandler:
                 capture_output=True, text=True, timeout=10,
             )
             if result.returncode == 0:
-                return result.stdout.strip()
+                return result.stdout.strip().replace(" (Claude Code)", "")
             return "unknown"
         except Exception:
             return "unknown"
@@ -398,7 +398,7 @@ class MessageHandler:
                 success=True,
                 response_text=(
                     f"📊 会话状态\n"
-                    f"Bridge 版本: {__version__}\n"
+                    f"cc-feishu-bridge 版本: {__version__}\n"
                     f"Claude Code 版本: {claude_version}\n"
                     f"PID: {os.getpid()}\n"
                     f"会话ID: {session.session_id}\n"
