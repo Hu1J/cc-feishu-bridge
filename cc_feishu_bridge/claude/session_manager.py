@@ -357,6 +357,49 @@ class SessionManager:
                 (datetime.utcnow().isoformat(), session_id),
             )
 
+    def get_recent_messages(
+        self,
+        session_id: str,
+        limit: int = 10,
+        before_message_id: str | None = None,
+    ) -> list[dict]:
+        """Fetch the most recent N messages for a session (for context injection).
+
+        Returns a list of dicts with keys: content, user_open_id, direction, created_at.
+        If before_message_id is provided, only return messages older than that ID
+        (to avoid duplicating the current message in context).
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            if before_message_id:
+                rows = conn.execute(
+                    """SELECT content, raw_content, user_open_id, direction, created_at
+                       FROM messages
+                       WHERE session_id = ? AND message_id != ?
+                       ORDER BY created_at DESC
+                       LIMIT ?""",
+                    (session_id, before_message_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT content, raw_content, user_open_id, direction, created_at
+                       FROM messages
+                       WHERE session_id = ?
+                       ORDER BY created_at DESC
+                       LIMIT ?""",
+                    (session_id, limit),
+                ).fetchall()
+        # Return in chronological order (oldest first) for context
+        return [
+            {
+                "content": row["content"] or row["raw_content"],
+                "user_open_id": row["user_open_id"],
+                "direction": row["direction"],
+                "created_at": row["created_at"],
+            }
+            for row in reversed(rows)
+        ]
+
     def store_message(
         self,
         message_id: str,

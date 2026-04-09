@@ -111,11 +111,26 @@ async def handle_message(message: IncomingMessage, handler: MessageHandler) -> N
     """Callback for incoming Feishu messages — dispatch to handler."""
     # Keep error notifier's chat_id fresh for error reporting
     notifier_update_chat_id(message.chat_id)
-    # Store raw message for memory enhancement
+    # Store raw message for memory enhancement.
+    # For group chats (especially mention mode), ensure a session exists first so
+    # that ALL messages — including those that don't @mention the bot — are stored.
     session = None
     if message.user_open_id:
         session_key = message.user_open_id if message.chat_type == "p2p" else message.chat_id
         session = handler.sessions.get_active_session(session_key)
+        if not session and message.chat_type == "group":
+            # Group chat with no session yet — create one so messages can be stored
+            # even before the bot is @mentioned. This preserves context for later.
+            project_path = (
+                handler.config.resolve_project_path(message.chat_id, message.user_open_id)
+                if handler.config else handler.approved_directory
+            )
+            session = handler.sessions.create_session(
+                user_id=message.user_open_id,
+                project_path=project_path,
+                chat_type=message.chat_type,
+                chat_id=message.chat_id,
+            )
         if session:
             handler.sessions.update_session(session.session_id, update_last_message=True)
             handler.sessions.store_message(

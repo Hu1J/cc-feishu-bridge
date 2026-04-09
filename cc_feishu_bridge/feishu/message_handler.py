@@ -333,9 +333,27 @@ class MessageHandler:
             self.memory_manager.inject_context(user_open_id=message.user_open_id)
             if should_inject else ""
         )
+
+        # For group chat mention mode: fetch recent messages from this session
+        # to give Claude context about what was being discussed before this @mention.
+        chat_history_context = ""
+        if message.chat_type == "group" and session:
+            recent = self.sessions.get_recent_messages(
+                session.session_id,
+                limit=10,
+                before_message_id=message.message_id,
+            )
+            if recent:
+                lines = ["【群聊最近消息】"]
+                for msg in recent:
+                    who = "我" if msg["direction"] == "incoming" else "Claude"
+                    content = msg["content"][:200] + ("…" if len(msg["content"]) > 200 else "")
+                    lines.append(f"{who}: {content}")
+                chat_history_context = "\n".join(lines) + "\n"
         system_prompt_append = (
             MEMORY_SYSTEM_GUIDE
             + FEISHU_FILE_GUIDE
+            + chat_history_context
             + user_pref_context
         )
         await self._run_query(message, session, sdk_session_id, system_prompt_append, session_key)
