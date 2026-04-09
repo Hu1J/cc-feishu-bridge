@@ -22,15 +22,22 @@ PROMPT_TEMPLATE = """分析 {project_path} 项目：
 语气自然，像同事之间的日常交流。开头不要加"嗨"或"你好"之类的客套话。"""
 
 
-def _is_in_time_window(start: str, end: str) -> bool:
-    """Return True if current local time is within [start, end)."""
-    now = datetime.now().time()
+def _is_in_time_window(start: str, end: str, _now: "time | None" = None) -> bool:
+    """Return True if current local time is within [start, end).
+
+    Args:
+        start: Start time in HH:MM format (inclusive).
+        end: End time in HH:MM format (exclusive).
+        _now: Optional time to use as current time (for testing only).
+    """
+    if _now is None:
+        _now = datetime.now().time()
     start_t = time.fromisoformat(start)
     end_t = time.fromisoformat(end)
     if start_t <= end_t:
-        return start_t <= now < end_t
+        return start_t <= _now < end_t
     # handles overnight window like 22:00-08:00
-    return now >= start_t or now < end_t
+    return _now >= start_t or _now < end_t
 
 
 async def _send_proactive_message(
