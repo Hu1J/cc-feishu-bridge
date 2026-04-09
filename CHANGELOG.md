@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.0] - 2026-04-09
+
+### Added
+- **群聊多用户支持**：支持飞书群聊场景，机器人可加入群组响应 @mention 消息
+- **session_key 路由**：P2P 私聊按 `user_open_id` 做 session key，群人聊按 `chat_id` 做 session key，彻底分离不同聊天的上下文
+- **ChatLockManager**：每个聊天独立的并发锁，防止同一聊天内多条消息并发处理导致响应混乱
+- **ClaudeIntegrationPool**：连接池管理多个 Claude 会话，LRU 驱逐策略，支持无限模式
+- **should_respond**：新增 `should_respond` 逻辑，支持 mention 和 open 两种群聊模式
+- **chat_modes 配置**：支持按 chat_id 单独配置模式（`open` / `mention`），支持用户级别和聊天级别配置覆盖
+- **群聊 @mention 上下文注入**：收到群聊 @mention 时，自动注入该 session 最近 10 条消息作为上下文
+- **group_chat auto_register**：机器人加入群聊时自动注册，无需手动配置
+
+### Changed
+- **/status 输出优化**：去掉 "(Claude Code)" 后缀，"Bridge 版本" 改为 "cc-feishu-bridge 版本"
+- **/git 输出优化**：emoji 图标替换为纯文字符号（`M`/`D`/`A`/`??`），更清晰
+
+### Fixed
+- **Session key 群聊问题**：修复 `update_chat_id` 时 session key 未正确更新的问题
+- **_is_in_time_window 可测试化**：新增 `_now` 参数，测试无需 mock datetime
+
 ## [0.3.14] - 2026-04-07
 
 ### Added
