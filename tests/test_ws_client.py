@@ -78,7 +78,7 @@ def test_group_message_has_chat_type():
     event.event.sender = MagicMock()
     event.event.sender.sender_id = MagicMock()
     event.event.sender.sender_id.open_id = "ou_user2"
-    event.event.chat_type = "group"
+    event.event.message.chat_type = "group"
 
     result = []
     async def capture(msg):
@@ -112,7 +112,7 @@ def test_p2p_message_has_chat_type():
     event.event.sender = MagicMock()
     event.event.sender.sender_id = MagicMock()
     event.event.sender.sender_id.open_id = "ou_user1"
-    event.event.chat_type = "p2p"
+    event.event.message.chat_type = "p2p"
 
     result = []
     async def capture(msg):
