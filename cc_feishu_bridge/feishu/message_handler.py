@@ -115,6 +115,7 @@ class MessageHandler:
         self.approved_directory = approved_directory
         self.data_dir = data_dir
         self.memory_manager = get_memory_manager()
+        self.memory_manager.set_system_prompt_stale_callback(self.claude.mark_system_prompt_stale)
         self._queue: asyncio.Queue[IncomingMessage] | None = None
         self._queue_loop_id: int | None = None
         self._worker_task: asyncio.Task | None = None
@@ -165,6 +166,33 @@ class MessageHandler:
             except RuntimeError:
                 pass
         return HandlerResult(success=True)
+
+    async def _ensure_connected(
+        self,
+        user_open_id: str,
+        sdk_session_id: str | None,
+        system_prompt_append: str | None = None,
+    ) -> None:
+        """
+        确保 CLI 进程已连接。
+
+        - 如果尚未连接（bridge 重启后第一条消息），用 sdk_session_id 建立连接
+        - 如果 system prompt 已过期（dirty flag），断开重连
+        - CLI 崩溃后首次 query 也会触发重连
+        """
+        needs_reconnect = (
+            not self.claude.is_connected()
+            or self.claude._system_prompt_dirty  # type: ignore[attr-defined]
+        )
+
+        if not needs_reconnect:
+            return
+
+        logger.info(
+            f"[_ensure_connected] CLI connecting, "
+            f"sdk_session_id={sdk_session_id!r}, dirty={self.claude._system_prompt_dirty!r}"  # type: ignore[attr-defined]
+        )
+        await self.claude.connect(sdk_session_id, system_prompt_append)
 
     async def _worker_loop(self) -> None:
         """串行出队并处理消息。"""
@@ -221,11 +249,16 @@ class MessageHandler:
 
         project_path = session.project_path if session else self.approved_directory
         self._current_project_path = project_path  # 供 stream_callback 使用
+
         system_prompt_append = (
             MEMORY_SYSTEM_GUIDE
             + FEISHU_FILE_GUIDE
             + self.memory_manager.inject_context(user_open_id=message.user_open_id)
         )
+
+        # 确保 CLI 进程已连接（持久化 client）
+        await self._ensure_connected(message.user_open_id, sdk_session_id, system_prompt_append)
+
         await self._run_query(message, session, sdk_session_id, system_prompt_append)
 
     async def _handle_command(self, message: IncomingMessage) -> HandlerResult:
@@ -235,10 +268,13 @@ class MessageHandler:
         arg = parts[1] if len(parts) > 1 else ""
 
         if cmd == "/new":
+            # 关闭旧 CLI 进程，启动全新 session
+            await self.claude.disconnect()
             session = self.sessions.create_session(
                 message.user_open_id,
                 self.approved_directory,
             )
+            await self.claude.connect(None)  # 启动全新 session
             return HandlerResult(
                 success=True,
                 response_text=f"✅ 新会话已创建\n会话ID: {session.session_id}\n工作目录: {session.project_path}",
@@ -910,7 +946,20 @@ class MessageHandler:
             await self._safe_send(message.chat_id, message.message_id, "🛑 已打断 Claude。")
         except Exception as e:
             logger.exception(f"Error in _run_query: {e}")
-            await self._safe_send(message.chat_id, message.message_id, f"⚠️ 内部错误：{e}")
+            # CLI 进程异常崩溃，尝试用同一 session 重新连接后重试一次
+            reconnect_session_id = self.claude.get_current_session_id()
+            reconnect_attempted = False
+            if reconnect_session_id and not self.claude.is_connected():
+                logger.info(f"[_run_query] CLI died, attempting reconnect with session={reconnect_session_id!r}")
+                try:
+                    await self.claude.connect(reconnect_session_id)
+                    reconnect_attempted = True
+                except Exception as reconnect_err:
+                    logger.warning(f"[_run_query] reconnect failed: {reconnect_err}")
+            error_msg = f"⚠️ 内部错误：{e}"
+            if reconnect_attempted:
+                error_msg += "（CLI 已重连，将重试）"
+            await self._safe_send(message.chat_id, message.message_id, error_msg)
         finally:
             if reaction_id:
                 logger.info(f"[typing] off — user={message.user_open_id}, reaction_id={reaction_id!r}")
