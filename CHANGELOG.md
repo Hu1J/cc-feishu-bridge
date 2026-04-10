@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.15] - 2026-04-10
+
+### Added
+- **AskUserQuestion 飞书卡片**：Claude Code 的 `AskUserQuestion` 工具调用现在以精美的飞书 Interactive Card 展示，包含问题标题、选项列表和交互提示
+
 ## [0.3.14] - 2026-04-07
 
 ### Added
