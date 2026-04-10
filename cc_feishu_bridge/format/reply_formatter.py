@@ -5,6 +5,7 @@ import json
 import re
 
 from cc_feishu_bridge.format.edit_diff import build_edit_marker, build_write_marker, _DiffMarker, _MemoryCardMarker
+from cc_feishu_bridge.format.questionnaire_card import _AskUserQuestionMarker
 
 FEISHU_MAX_MESSAGE_LENGTH = 4096
 # Feishu CardKit limit for markdown tables per card
@@ -207,6 +208,14 @@ class ReplyFormatter:
         # TodoWrite → markdown 表格
         elif tool_name == "TodoWrite":
             return self._format_todowrite_tool(tool_input)
+
+        # AskUserQuestion → 精美问卷卡片
+        elif tool_name == "AskUserQuestion":
+            marker = _AskUserQuestionMarker(tool_name, tool_input)
+            if marker.card is not None:
+                return marker
+            # 解析失败，降级为普通文本
+            return f"🤖 **{tool_name}**\n`{tool_input}`"
 
         # Memory MCP tools → 卡片标记（触发 Feishu Interactive Card）
         elif tool_name and tool_name.startswith("mcp__memory__"):
