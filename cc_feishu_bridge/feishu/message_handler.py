@@ -17,6 +17,7 @@ from cc_feishu_bridge.claude.feishu_file_tools import FEISHU_FILE_GUIDE
 from cc_feishu_bridge.claude.session_manager import SessionManager
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 from cc_feishu_bridge.format.edit_diff import _DiffMarker, _MemoryCardMarker
+from cc_feishu_bridge.format.questionnaire_card import _AskUserQuestionMarker
 
 logger = logging.getLogger(__name__)
 
@@ -849,6 +850,26 @@ class MessageHandler:
                         except Exception:
                             logger.warning(f"send_interactive_reply failed for memory tool, falling back")
                             await self._safe_send(message.chat_id, message.message_id, result.card_md, log_reply=False)
+                    elif isinstance(result, _AskUserQuestionMarker):
+                        # AskUserQuestion → 精美飞书卡片
+                        if result.card is not None:
+                            try:
+                                await self.feishu.send_edit_diff_card(
+                                    message.chat_id, result.card, message.message_id, log_reply=False
+                                )
+                            except Exception:
+                                # 卡片发送失败，降级为带图标的纯文本
+                                await self._safe_send(
+                                    message.chat_id, message.message_id,
+                                    f"🤖 **{result.tool_name}**\n`{result.tool_input[:500]}`",
+                                    log_reply=False,
+                                )
+                        else:
+                            await self._safe_send(
+                                message.chat_id, message.message_id,
+                                f"🤖 **{result.tool_name}**\n`{result.tool_input[:500]}`",
+                                log_reply=False,
+                            )
                     else:
                         await self._safe_send(message.chat_id, message.message_id, result, log_reply=False)
                 elif claude_msg.content:
