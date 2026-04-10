@@ -84,20 +84,26 @@ class ClaudeIntegration:
         self._system_prompt_append = system_prompt_append
         self._system_prompt_dirty = False
 
+        is_resuming = sdk_session_id is not None
+
         options = ClaudeAgentOptions(
             cwd=self.approved_directory or ".",
             max_turns=self.max_turns,
             cli_path=self.cli_path,
             include_partial_messages=True,
             permission_mode="bypassPermissions",
-            continue_conversation=True,
-            session_id=sdk_session_id,
-            fork_session=True,  # fork 出来继续，保留原 session 历史
             mcp_servers={
                 "memory": get_memory_mcp_server(),
                 "feishu_file": get_feishu_file_mcp_server(),
             },
         )
+
+        if is_resuming:
+            # 恢复已有会话：fork 出来继续，保留历史
+            options.session_id = sdk_session_id
+            options.fork_session = True
+            options.continue_conversation = True
+        # else: 全新会话，不设置 session_id/fork_session/continue_conversation
 
         if system_prompt_append:
             options.system_prompt = {
@@ -109,14 +115,27 @@ class ClaudeIntegration:
         self._client = ClaudeSDKClient(options=options)
         self._client_session_id = sdk_session_id
 
-        await self._client.connect()
+        try:
+            await self._client.connect()
+        except Exception as e:
+            # fork_session 模式下，如果会话被其他进程占用，CLI 退出码为 1。
+            # 此时降级到全新会话。
+            if is_resuming and getattr(e, "exit_code", None) == 1:
+                logger.warning(
+                    f"[ClaudeIntegration.connect] Session {sdk_session_id!r} already in use "
+                    f"(exit code 1), falling back to fresh session"
+                )
+                await self.connect(sdk_session_id=None, system_prompt_append=system_prompt_append)
+                return None
+            raise
+
         self._client_ready = True
 
         logger.info(
             f"[ClaudeIntegration.connect] CLI process started, "
-            f"sdk_session_id={sdk_session_id!r}"
+            f"is_resuming={is_resuming}, sdk_session_id={sdk_session_id!r}"
         )
-        return sdk_session_id
+        return self._client_session_id
 
     async def disconnect(self) -> None:
         """关闭持久 CLI 进程。"""
