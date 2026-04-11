@@ -295,8 +295,7 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     proactive.start()
 
     # CLI 进程在第一条消息到达时才会建立连接（_ensure_connected 懒加载）。
-    # 这样 bridge 重启后，第一条消息会从 DB 读 sdk_session_id，
-    # 用 fork 方式恢复之前的会话上下文。
+    # SDK 通过 continue_conversation=True 自动维护 session，无需手动 fork。
     ws_client.start()
 
 

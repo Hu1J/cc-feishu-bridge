@@ -169,16 +169,13 @@ class MessageHandler:
 
     async def _ensure_connected(
         self,
-        user_open_id: str,
-        sdk_session_id: str | None,
         system_prompt_append: str | None = None,
     ) -> None:
         """
         确保 CLI 进程已连接。
 
-        - 如果尚未连接（bridge 重启后第一条消息），用 sdk_session_id 建立连接
+        - 如果尚未连接，建立连接
         - 如果 system prompt 已过期（dirty flag），断开重连
-        - CLI 崩溃后首次 query 也会触发重连
         """
         needs_reconnect = (
             not self.claude.is_connected()
@@ -189,10 +186,9 @@ class MessageHandler:
             return
 
         logger.info(
-            f"[_ensure_connected] CLI connecting, "
-            f"sdk_session_id={sdk_session_id!r}, dirty={self.claude._system_prompt_dirty!r}"  # type: ignore[attr-defined]
+            f"[_ensure_connected] CLI connecting, dirty={self.claude._system_prompt_dirty!r}"  # type: ignore[attr-defined]
         )
-        await self.claude.connect(sdk_session_id, system_prompt_append)
+        await self.claude.connect(system_prompt_append)
 
     async def _worker_loop(self) -> None:
         """串行出队并处理消息。"""
@@ -243,7 +239,6 @@ class MessageHandler:
         #         return
 
         session = self.sessions.get_active_session(message.user_open_id)
-        sdk_session_id = session.sdk_session_id if session else None
         if session and session.chat_id != message.chat_id:
             self.sessions.update_chat_id(message.user_open_id, message.chat_id)
 
@@ -257,9 +252,9 @@ class MessageHandler:
         )
 
         # 确保 CLI 进程已连接（持久化 client）
-        await self._ensure_connected(message.user_open_id, sdk_session_id, system_prompt_append)
+        await self._ensure_connected(system_prompt_append)
 
-        await self._run_query(message, session, sdk_session_id, system_prompt_append)
+        await self._run_query(message, session)
 
     async def _handle_command(self, message: IncomingMessage) -> HandlerResult:
         """Handle slash commands like /new, /status."""
@@ -274,7 +269,7 @@ class MessageHandler:
                 message.user_open_id,
                 self.approved_directory,
             )
-            await self.claude.connect(None)  # 启动全新 session
+            await self.claude.connect()  # 启动全新 session
             return HandlerResult(
                 success=True,
                 response_text=f"✅ 新会话已创建\n会话ID: {session.session_id}\n工作目录: {session.project_path}",
@@ -731,8 +726,6 @@ class MessageHandler:
         self,
         message: IncomingMessage,
         session,
-        sdk_session_id: str | None,
-        system_prompt_append: str | None = None,
     ) -> None:
         """Run Claude query in background, send results to Feishu on completion."""
         reaction_id = None
@@ -907,12 +900,10 @@ class MessageHandler:
             else:
                 # Text messages: prepend prefix to actual text content
                 full_prompt = (prefix + message.content).strip()
-            response, new_session_id, cost = await self.claude.query(
+            response, _, cost = await self.claude.query(
                 prompt=full_prompt,
-                session_id=sdk_session_id,
                 cwd=session.project_path if session else self.approved_directory,
                 on_stream=stream_callback,
-                system_prompt_append=system_prompt_append,
             )
 
             # Flush any remaining buffered text
@@ -923,13 +914,9 @@ class MessageHandler:
                 session = self.sessions.create_session(
                     message.user_open_id,
                     self.approved_directory,
-                    sdk_session_id=new_session_id,
                 )
             else:
                 self.sessions.update_session(session.session_id, cost=cost, message_increment=1)
-                # Update SDK session ID if Claude returned a new one
-                if new_session_id:
-                    self.sessions.update_sdk_session_id(session.session_id, new_session_id)
 
 
             # Send final text response only if no text was streamed.
@@ -946,13 +933,12 @@ class MessageHandler:
             await self._safe_send(message.chat_id, message.message_id, "🛑 已打断 Claude。")
         except Exception as e:
             logger.exception(f"Error in _run_query: {e}")
-            # CLI 进程异常崩溃，尝试用同一 session 重新连接后重试一次
-            reconnect_session_id = self.claude.get_current_session_id()
+            # CLI 进程异常崩溃，尝试重新连接后重试一次
             reconnect_attempted = False
-            if reconnect_session_id and not self.claude.is_connected():
-                logger.info(f"[_run_query] CLI died, attempting reconnect with session={reconnect_session_id!r}")
+            if not self.claude.is_connected():
+                logger.info("[_run_query] CLI died, attempting reconnect")
                 try:
-                    await self.claude.connect(reconnect_session_id)
+                    await self.claude.connect()
                     reconnect_attempted = True
                 except Exception as reconnect_err:
                     logger.warning(f"[_run_query] reconnect failed: {reconnect_err}")

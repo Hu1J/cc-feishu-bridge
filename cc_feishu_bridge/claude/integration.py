@@ -38,7 +38,6 @@ class ClaudeIntegration:
         self.max_turns = max_turns
         self.approved_directory = approved_directory
         self._client: Optional[Any] = None  # 持久化 client
-        self._client_session_id: Optional[str] = None  # CLI 进程对应的 session
         self._client_ready: bool = False
         self._system_prompt_append: str | None = None  # 缓存当前 system prompt
         self._system_prompt_dirty: bool = False  # True = 下次 query 前需重连
@@ -62,17 +61,10 @@ class ClaudeIntegration:
 
     async def connect(
         self,
-        sdk_session_id: str | None = None,
         system_prompt_append: str | None = None,
-    ) -> str:
+    ) -> None:
         """
-        建立持久 CLI 进程。
-
-        - sdk_session_id=None: 启动全新 session
-        - sdk_session_id=X: fork X 继续（旧 session 历史完整保留）
-        - system_prompt_append: 追加到 system prompt 的内容
-
-        返回实际使用的 session_id。
+        建立持久 CLI 进程。SDK 通过 continue_conversation=True 自动维护 session。
         """
         if self._client is not None:
             await self.disconnect()
@@ -124,12 +116,7 @@ class ClaudeIntegration:
             logger.warning(f"[ClaudeIntegration.disconnect] error: {e}")
         finally:
             self._client = None
-            self._client_session_id = None
             self._client_ready = False
-
-    def get_current_session_id(self) -> str | None:
-        """返回当前 CLI 进程对应的 session_id。"""
-        return self._client_session_id
 
     def is_connected(self) -> bool:
         """返回 CLI 进程是否已连接。"""
@@ -142,10 +129,8 @@ class ClaudeIntegration:
     async def query(
         self,
         prompt: str,
-        session_id: str | None = None,
         cwd: str | None = None,
         on_stream: StreamCallback | None = None,
-        system_prompt_append: str | None = None,
     ) -> tuple[str, str | None, float]:
         """
         通过持久 CLI 进程发送消息。
