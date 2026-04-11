@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.15] - 2026-04-11
+
+### Added
+- **AskUserQuestion 精美卡片**：Claude Code 的 `AskUserQuestion` 工具调用渲染为飞书 Interactive Card，展示问题和选项，而非纯文本
+
+### Changed
+- **SDK session 管理简化**：只用 `continue_conversation=True`，不再手动传 session_id，代码大幅简化
+- **CLI 懒连接机制**：`connect()` 只在第一条消息时调用，`disconnect()` 不再由外部调用
+
+### Fixed
+- **error_notifier 线程安全**：`asyncio.run_coroutine_threadsafe` 替代 `call_soon_threadsafe` 修复 `_send_async` 未正确 await 的问题
+- **fork_session 会话冲突**：fork 冲突时自动降级到全新会话，不再报错
+- **AskUserQuestion 卡片 tag 元素**：Feishu Card 不支持 `tag` 元素，改为 `markdown` 元素
+
 ## [0.3.14] - 2026-04-07
 
 ### Added
