@@ -66,8 +66,13 @@ class ClaudeIntegration:
         """
         建立持久 CLI 进程。SDK 通过 continue_conversation=True 自动维护 session。
         """
+        import time as time_module
+
         if self._client is not None:
+            logger.info(f"[ClaudeIntegration.connect] existing client found, disconnecting first...")
+            t0 = time_module.time()
             await self.disconnect()
+            logger.info(f"[ClaudeIntegration.connect] disconnect took {time_module.time() - t0:.1f}s")
 
         from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
         from cc_feishu_bridge.claude.memory_tools import get_memory_mcp_server
@@ -76,17 +81,30 @@ class ClaudeIntegration:
         self._system_prompt_append = system_prompt_append
         self._system_prompt_dirty = False
 
+        t = time_module.time()
+        logger.info("[ClaudeIntegration.connect] getting memory MCP server...")
+        memory_server = get_memory_mcp_server()
+        logger.info(f"[ClaudeIntegration.connect] memory MCP server ready in {time_module.time()-t:.1f}s")
+
+        t = time_module.time()
+        logger.info("[ClaudeIntegration.connect] getting feishu_file MCP server...")
+        feishu_server = get_feishu_file_mcp_server()
+        logger.info(f"[ClaudeIntegration.connect] feishu_file MCP server ready in {time_module.time()-t:.1f}s")
+
+        logger.info(f"[ClaudeIntegration.connect] creating ClaudeSDKClient, cli_path={self.cli_path!r}, cwd={self.approved_directory!r}")
+
         options = ClaudeAgentOptions(
             cwd=self.approved_directory or ".",
-            max_turns=self.max_turns,
-            cli_path=self.cli_path,
+            # NOTE: 不传 cli_path，让 SDK 使用内置的 bundled CLI。
+            # 显式指定 cli_path 在 Windows 上会导致 initialize() 超时，
+            # 因为 claude.CMD 这个 npm 包装器在 anyio.open_process 中
+            # 处理时存在问题。
             include_partial_messages=True,
             permission_mode="bypassPermissions",
-            # SDK 内部自动维护 session 状态，每次 query 接着上一次继续
             continue_conversation=True,
             mcp_servers={
-                "memory": get_memory_mcp_server(),
-                "feishu_file": get_feishu_file_mcp_server(),
+                "memory": memory_server,
+                "feishu_file": feishu_server,
             },
         )
 
@@ -102,37 +120,47 @@ class ClaudeIntegration:
         # SDK connect 有概率在 Windows 上超时，重试最多 3 次
         last_err = None
         for attempt in range(3):
+            logger.info(f"[ClaudeIntegration.connect] attempt {attempt + 1}/3, calling _client.connect()...")
+            t_connect = time_module.time()
             try:
                 await self._client.connect()
+                elapsed = time_module.time() - t_connect
+                logger.info(f"[ClaudeIntegration.connect] attempt {attempt + 1} succeeded in {elapsed:.1f}s")
                 break
             except Exception as e:
+                elapsed = time_module.time() - t_connect
                 last_err = e
-                logger.warning(f"[ClaudeIntegration.connect] attempt {attempt + 1} failed: {e}")
+                logger.warning(f"[ClaudeIntegration.connect] attempt {attempt + 1} failed after {elapsed:.1f}s: {e}")
                 if attempt < 2:
+                    logger.info(f"[ClaudeIntegration.connect] recreating client for retry...")
                     # 重置 client，准备重试
                     self._client = ClaudeSDKClient(options=options)
         else:
             # 3 次全失败
             self._client = None
+            self._client_ready = False
+            logger.error(f"[ClaudeIntegration.connect] all 3 attempts failed")
             raise last_err
 
         self._client_ready = True
-
         logger.info("[ClaudeIntegration.connect] CLI process started, continue_conversation=True")
 
     async def disconnect(self) -> None:
         """关闭持久 CLI 进程。"""
         if self._client is None:
+            logger.info("[ClaudeIntegration.disconnect] no client, returning")
             return
 
-        logger.info("[ClaudeIntegration.disconnect] CLI process shutting down")
+        logger.info("[ClaudeIntegration.disconnect] CLI process shutting down...")
         try:
             await self._client.disconnect()
+            logger.info("[ClaudeIntegration.disconnect] disconnect() returned successfully")
         except Exception as e:
             logger.warning(f"[ClaudeIntegration.disconnect] error: {e}")
         finally:
             self._client = None
             self._client_ready = False
+            logger.info("[ClaudeIntegration.disconnect] client set to None, ready=False")
 
     def is_connected(self) -> bool:
         """返回 CLI 进程是否已连接。"""
@@ -142,9 +170,14 @@ class ClaudeIntegration:
         """
         确保 CLI 已连接，未连接或 system prompt 已过期时自动重连。
         """
-        needs_reconnect = not self.is_connected() or self._system_prompt_dirty
+        connected = self.is_connected()
+        dirty = self._system_prompt_dirty
+        logger.info(f"[ClaudeIntegration.ensure_connected] is_connected={connected}, dirty={dirty}")
+        needs_reconnect = not connected or dirty
         if not needs_reconnect:
+            logger.info("[ClaudeIntegration.ensure_connected] no reconnect needed")
             return
+        logger.info(f"[ClaudeIntegration.ensure_connected] calling connect()...")
         await self.connect(system_prompt_append)
 
     # -------------------------------------------------------------------------
@@ -167,6 +200,7 @@ class ClaudeIntegration:
                 "ClaudeIntegration not connected. Call connect() first."
             )
 
+        import time as time_module
         try:
             result_text = ""
             result_session_id = None
@@ -176,6 +210,7 @@ class ClaudeIntegration:
                 f"[ClaudeIntegration.query] >>> cwd={cwd or self.approved_directory!r}"
             )
 
+            t_query = time_module.time()
             # 通过持久 client 发送 query，SDK 自动维护 session 继续
             await self._client.query(prompt=prompt)
 
@@ -186,9 +221,10 @@ class ClaudeIntegration:
                     result_text = getattr(message, "result", "") or ""
                     result_session_id = getattr(message, "session_id", None)
                     result_cost = getattr(message, "total_cost_usd", 0.0) or 0.0
+                    elapsed = time_module.time() - t_query
                     # 只打印 session_id，不存储也不用于后续
                     logger.info(
-                        f"[ClaudeIntegration.query] <<< session_id={result_session_id!r}, cost={result_cost!r}"
+                        f"[ClaudeIntegration.query] <<< session_id={result_session_id!r}, cost={result_cost!r}, elapsed={elapsed:.1f}s"
                     )
 
                 if on_stream:
@@ -199,7 +235,8 @@ class ClaudeIntegration:
             return (result_text, result_session_id, result_cost)
 
         except Exception as e:
-            logger.exception(f"[ClaudeIntegration.query] error: {e}")
+            elapsed = time_module.time() - t_query
+            logger.exception(f"[ClaudeIntegration.query] error after {elapsed:.1f}s: {e}")
             # CLI 进程可能已崩溃，标记为未就绪
             self._client_ready = False
             raise
