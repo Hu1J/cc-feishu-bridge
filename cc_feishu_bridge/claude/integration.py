@@ -1,6 +1,7 @@
 """Claude Code integration via claude-agent-sdk."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
 from dataclasses import dataclass
@@ -41,6 +42,8 @@ class ClaudeIntegration:
         self._client_ready: bool = False
         self._system_prompt_append: str | None = None  # 缓存当前 system prompt
         self._system_prompt_dirty: bool = False  # True = 下次 query 前需重连
+        self._query_lock: asyncio.Lock = asyncio.Lock()  # 保证同一时间只有一个 query 在执行
+        self._interrupt_lock: asyncio.Lock = asyncio.Lock()  # 保证 interrupt 不能重入
 
     # -------------------------------------------------------------------------
     # System prompt stale marking
@@ -193,6 +196,8 @@ class ClaudeIntegration:
         """
         通过持久 CLI 进程发送消息。
 
+        协程锁保证同一时间只有一个 query 在执行，避免消息流并发消费混乱。
+
         Returns: (response_text, new_session_id, cost_usd)
         """
         if self._client is None or not self._client_ready:
@@ -202,37 +207,38 @@ class ClaudeIntegration:
 
         import time as time_module
         try:
-            result_text = ""
-            result_session_id = None
-            result_cost = 0.0
+            async with self._query_lock:
+                result_text = ""
+                result_session_id = None
+                result_cost = 0.0
 
-            logger.info(
-                f"[ClaudeIntegration.query] >>> cwd={cwd or self.approved_directory!r}"
-            )
+                logger.info(
+                    f"[ClaudeIntegration.query] >>> cwd={cwd or self.approved_directory!r}"
+                )
 
-            t_query = time_module.time()
-            # 通过持久 client 发送 query，SDK 自动维护 session 继续
-            await self._client.query(prompt=prompt)
+                t_query = time_module.time()
+                # 通过持久 client 发送 query，SDK 自动维护 session 继续
+                await self._client.query(prompt=prompt)
 
-            async for message in self._client.receive_response():
-                msg_type = type(message).__name__
+                async for message in self._client.receive_response():
+                    msg_type = type(message).__name__
 
-                if msg_type == "ResultMessage":
-                    result_text = getattr(message, "result", "") or ""
-                    result_session_id = getattr(message, "session_id", None)
-                    result_cost = getattr(message, "total_cost_usd", 0.0) or 0.0
-                    elapsed = time_module.time() - t_query
-                    # 只打印 session_id，不存储也不用于后续
-                    logger.info(
-                        f"[ClaudeIntegration.query] <<< session_id={result_session_id!r}, cost={result_cost!r}, elapsed={elapsed:.1f}s"
-                    )
+                    if msg_type == "ResultMessage":
+                        result_text = getattr(message, "result", "") or ""
+                        result_session_id = getattr(message, "session_id", None)
+                        result_cost = getattr(message, "total_cost_usd", 0.0) or 0.0
+                        elapsed = time_module.time() - t_query
+                        # 只打印 session_id，不存储也不用于后续
+                        logger.info(
+                            f"[ClaudeIntegration.query] <<< session_id={result_session_id!r}, cost={result_cost!r}, elapsed={elapsed:.1f}s"
+                        )
 
-                if on_stream:
-                    parsed = self._parse_message(message)
-                    if parsed:
-                        await on_stream(parsed)
+                    if on_stream:
+                        parsed = self._parse_message(message)
+                        if parsed:
+                            await on_stream(parsed)
 
-            return (result_text, result_session_id, result_cost)
+                return (result_text, result_session_id, result_cost)
 
         except Exception as e:
             elapsed = time_module.time() - t_query
@@ -246,15 +252,51 @@ class ClaudeIntegration:
     # -------------------------------------------------------------------------
 
     async def interrupt_current(self) -> bool:
-        """Send SIGINT to the running Claude subprocess. Returns True if interrupted."""
+        """
+        Send SIGINT to the running Claude subprocess and drain the message stream.
+
+        Following the official SDK pattern: after sending interrupt, we must wait for
+        the message stream to fully drain (receive_response() to end) before
+        returning. This ensures the CLI's session context is clean before any
+        subsequent query.
+
+        Uses the query lock to prevent new queries from starting while draining.
+        Uses interrupt lock to prevent reentrant calls.
+        """
         if self._client is None or not self._client_ready:
             return False
-        try:
-            await self._client.interrupt()
-            return True
-        except Exception as e:
-            logger.warning(f"[ClaudeIntegration.interrupt_current] error: {e}")
-            return False
+        async with self._interrupt_lock:
+            try:
+                await self._client.interrupt()
+                logger.info("[ClaudeIntegration.interrupt_current] interrupt sent, acquiring lock to drain...")
+
+                # 等锁：确保当前没有 query 在执行，再开始 drain
+                # 这样 drain 期间不会有新 query 开始
+                try:
+                    # asyncio.Lock.acquire() 在 Python 3.9+ 返回 awaitable
+                    await asyncio.wait_for(self._query_lock.acquire(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    logger.warning("[ClaudeIntegration.interrupt_current] could not acquire lock within 30s, skipping drain")
+                    return True  # interrupt 已发出，query 会在结束后自己清理
+
+                try:
+                    logger.info("[ClaudeIntegration.interrupt_current] draining stream...")
+                    # drain 最多等 5 秒，防止 CLI interrupt 后完全不响应导致永久卡住
+                    async for _ in asyncio.wait_for(
+                        self._client.receive_response(),
+                        timeout=5.0,
+                    ):
+                        pass  # 丢弃消息，只为让流清空
+                    logger.info("[ClaudeIntegration.interrupt_current] stream drained")
+                except asyncio.TimeoutError:
+                    logger.warning("[ClaudeIntegration.interrupt_current] drain timed out after 5s, continuing anyway")
+                finally:
+                    self._query_lock.release()
+
+                return True
+            except Exception as e:
+                logger.warning(f"[ClaudeIntegration.interrupt_current] error: {e}")
+                return False
 
     # -------------------------------------------------------------------------
     # Helpers
