@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.19] - 2026-04-13
+
+### Fixed
+- **Windows initialize() 超时**：移除 `cli_path` 参数，解决 Windows 上 `Control request timeout: initialize` 超时问题。根因是显式传入 `cli_path` 绕过 SDK 内置 bundled CLI，改为使用 npm 的 `claude.CMD` 包装器，Windows 上 `anyio.open_process` 处理 .CMD 文件有问题
+
+### Changed
+- **移除 max_turns 限制**：对话不再限制最大轮数
+
 ## [0.3.18] - 2026-04-12
 
 ### Fixed
