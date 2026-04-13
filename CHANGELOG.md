@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.20] - 2026-04-13
+
+### Fixed
+- **/stop 打断机制**：简化 interrupt 流程，发 SIGINT 后直接 drain 残留消息，加 10 秒超时保护防止永久卡住
+- **query 锁机制**：`async with _query_lock` 防止并发消费消息流
+- **interrupt 重入保护**：`_interrupt_lock` 防止 `interrupt_current` 重入调用
+
+### Added
+- **新 Session 检测通知**：当 `sdk_session_id` 与上次不同时，飞书通知用户并显示新 Session ID
+
 ## [0.3.19] - 2026-04-13
 
 ### Fixed

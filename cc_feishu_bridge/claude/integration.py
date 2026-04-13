@@ -266,9 +266,15 @@ class ClaudeIntegration:
                 logger.info("[ClaudeIntegration.interrupt_current] interrupt sent, draining...")
 
                 # 等 query() 的 receive_response 退出并释放锁后，再 drain 残留
-                async for _ in self._client.receive_response():
-                    pass
-                logger.info("[ClaudeIntegration.interrupt_current] stream drained")
+                # 加 10 秒超时，防止 CLI interrupt 后完全不响应导致永久卡住
+                async def _drain():
+                    async for _ in self._client.receive_response():
+                        pass
+                try:
+                    await asyncio.wait_for(_drain(), timeout=10.0)
+                    logger.info("[ClaudeIntegration.interrupt_current] stream drained")
+                except asyncio.TimeoutError:
+                    logger.warning("[ClaudeIntegration.interrupt_current] drain timed out after 10s, continuing anyway")
                 return True
             except Exception as e:
                 logger.warning(f"[ClaudeIntegration.interrupt_current] error: {e}")
