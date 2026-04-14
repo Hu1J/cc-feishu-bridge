@@ -42,6 +42,10 @@ class ClaudeIntegration:
         self._query_lock = asyncio.Lock()  # 保证同一时间只有一个 query 在执行
         self._interrupt_lock = asyncio.Lock()  # 保证 interrupt 不能重入
 
+    def mark_system_prompt_stale(self) -> None:
+        """标记 system prompt 已过期，下次 query 时重新初始化。"""
+        self._options = None
+
     # -------------------------------------------------------------------------
     # Options 初始化
     # -------------------------------------------------------------------------
