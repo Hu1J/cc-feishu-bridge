@@ -897,7 +897,6 @@ class MessageHandler:
 
                 response, sdk_session_id_from_query, cost = await self.claude.query(
                     prompt=full_prompt,
-                    cwd=session.project_path if session else self.approved_directory,
                     on_stream=stream_callback,
                 )
                 last_cost = cost

@@ -90,6 +90,7 @@ async def _check_and_notify(
     """Check all users and send proactive messages where conditions are met."""
     cfg = config.proactive
     today = datetime.utcnow().strftime("%Y-%m-%d")
+    already_notified: list = []
 
     for session in session_manager.get_all_users():
         if not session.chat_id:
@@ -120,6 +121,10 @@ async def _check_and_notify(
             if cooldown < cfg.cooldown_minutes:
                 continue
 
+        # 按 chat_id 去重：同一个 chat_id 只发一条
+        if any(s.chat_id == session.chat_id for s in already_notified):
+            continue
+        already_notified.append(session)
         await _send_proactive_message(session, config, session_manager)
 
 

@@ -5,7 +5,7 @@ import asyncio
 import logging
 import shutil
 from dataclasses import dataclass
-from typing import Any, Callable, Awaitable, Optional
+from typing import Any, Callable, Awaitable
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,6 @@ class ClaudeIntegration:
     async def query(
         self,
         prompt: str,
-        cwd: str | None = None,
         on_stream: StreamCallback | None = None,
     ) -> tuple[str, str | None, float]:
         """
