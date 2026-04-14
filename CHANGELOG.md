@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.23] - 2026-04-14
+
+### Fixed
+- **主动推送重复发送**：修复同一用户多个 session 时会收到多次推送的问题，按 chat_id 去重
+- **ClaudeIntegration mark_system_prompt_stale 缺失**：MessageHandler 初始化时找不到此方法导致启动报错
+
+### Refactored
+- **query 打断机制**：移除 interrupt_current 方法，改用 listener 协程 + stop_event 模式
+- **清理未使用代码**：移除 integration.py 中未使用的 Optional 导入和 cwd 参数
+
 ## [0.3.22] - 2026-04-13
 
 ### Changed
