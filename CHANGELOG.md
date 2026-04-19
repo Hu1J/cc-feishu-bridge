@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-04-19
+
+### Fixed
+
+- **Proactive scheduler 修复**：
+  - `last_message_at` 从未更新导致沉默检测失效、无限发送的问题
+  - Daily cap 时区不匹配问题（UTC vs 本地时间导致 GMT+8 下凌晨时段 cap 失效）
+  - 默认 `check_interval_minutes` 从 5 调整为 30，`cooldown_minutes` 从 60 调整为 120
+- **Group history via Feishu API**：添加 `get_chat_history()` 方法，通过飞书 `im/v1/messages` 接口拉取群聊历史（需要 `im:message.group_msg` 权限）
+- **Group history 存储修复**：将历史存储从 `_process_message` 移至 `handle()` 入口，确保命令消息也被正确记录
+- **README**：补充 `im:message.group_msg` 权限说明
+
 ## [0.4.1] - 2026-04-19
 
 ### Added
