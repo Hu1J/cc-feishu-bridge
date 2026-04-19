@@ -3,9 +3,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import List, Dict
 
 import yaml
+
+
+@dataclass
+class GroupConfigEntry:
+    """Per-group configuration for group chat access control."""
+    enabled: bool = True              # 是否启用该群
+    require_mention: bool = True     # 是否必须 @CC 才响应
+    allow_from: list[str] = field(default_factory=list)  # 白名单 open_id（空=不限）
+
+
+# Type alias for group config dict: group_id -> GroupConfigEntry
+GroupConfig = Dict[str, GroupConfigEntry]
 
 
 @dataclass
@@ -15,6 +27,7 @@ class FeishuConfig:
     bot_name: str = "Claude"
     bot_open_id: str = ""        # 机器人的 open_id，用于检测群聊 @CC
     domain: str = "feishu"
+    groups: dict = field(default_factory=dict)  # group_id -> GroupConfigEntry dict
 
 
 @dataclass
@@ -92,9 +105,17 @@ def load_config(path: str, data_dir: str = "") -> Config:
     with open(path) as f:
         raw = yaml.safe_load(f)
 
+    # Deserialize groups: convert raw dicts to GroupConfigEntry objects
+    raw_groups = raw.get("feishu", {}).get("groups", {})
+    groups = {gid: GroupConfigEntry(**gentry) for gid, gentry in raw_groups.items()}
+
+    feishu_raw = raw.get("feishu", {}).copy()
+    feishu_raw["groups"] = groups
+    feishu_cfg = FeishuConfig(**feishu_raw)
+
     proactive = ProactiveConfig(**raw.get("proactive", {}))
     return Config(
-        feishu=FeishuConfig(**raw.get("feishu", {})),
+        feishu=feishu_cfg,
         auth=AuthConfig(**raw.get("auth", {})),
         claude=ClaudeConfig(**raw.get("claude", {})),
         storage=StorageConfig(**raw.get("storage", {})),

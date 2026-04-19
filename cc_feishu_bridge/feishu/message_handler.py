@@ -106,6 +106,7 @@ class MessageHandler:
         formatter: ReplyFormatter,
         approved_directory: str,
         data_dir: str = "",
+        feishu_groups: dict | None = None,
     ):
         self.feishu = feishu_client
         self.auth = authenticator
@@ -115,6 +116,8 @@ class MessageHandler:
         self.formatter = formatter
         self.approved_directory = approved_directory
         self.data_dir = data_dir
+        # Group config: group_id -> GroupConfigEntry (for per-group access control)
+        self._feishu_groups = feishu_groups or {}
         self.memory_manager = get_memory_manager()
         self.memory_manager.set_system_prompt_stale_callback(self.claude.mark_system_prompt_stale)
         self._queue: asyncio.Queue[IncomingMessage] | None = None
@@ -137,6 +140,42 @@ class MessageHandler:
             self._queue = asyncio.Queue()
             self._queue_loop_id = current_loop_id
         return self._queue
+
+    def _get_group_config(self, chat_id: str):
+        """Get GroupConfigEntry for a chat_id, if configured. Returns None if no per-group config."""
+        return self._feishu_groups.get(chat_id)
+
+    def _check_group_access(self, message: IncomingMessage) -> bool:
+        """Check if a group chat message should be processed.
+
+        Returns True if allowed, False if should be skipped.
+        """
+        if not message.is_group_chat:
+            return True
+
+        group_cfg = self._get_group_config(message.chat_id)
+
+        # If group is explicitly disabled, skip
+        if group_cfg and not group_cfg.enabled:
+            logger.info(f"Group {message.chat_id} is disabled in config, skipping")
+            return False
+
+        # If group has allow_from list, check sender
+        if group_cfg and group_cfg.allow_from:
+            if message.user_open_id not in group_cfg.allow_from:
+                logger.info(f"User {message.user_open_id} not in group allow_from for {message.chat_id}, skipping")
+                return False
+
+        # If group has require_mention=False, bypass mention check (respond to all group messages)
+        if group_cfg and not group_cfg.require_mention:
+            return True
+
+        # Default: require @CC mention for all group messages
+        if not message.mention_bot:
+            logger.info(f"Group chat message in {message.chat_id} without @CC mention, skipping")
+            return False
+
+        return True
 
     async def handle(self, message: IncomingMessage) -> HandlerResult:
         """将消息入队，立即返回。由 Worker 串行处理。
@@ -214,8 +253,8 @@ class MessageHandler:
             return
 
         # Group chat: skip if bot was not @mentioned (no response to avoid spam)
-        if message.is_group_chat and not message.mention_bot:
-            logger.info(f"Group chat message in {message.chat_id} without @CC mention, skipping")
+        # Group access control check (per-group config: enabled, allow_from, require_mention)
+        if not self._check_group_access(message):
             return
 
         if message.message_type not in ("text", "image", "file"):

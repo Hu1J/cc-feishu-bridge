@@ -100,6 +100,7 @@ def create_handler(config, data_dir: str) -> MessageHandler:
         formatter=formatter,
         approved_directory=config.claude.approved_directory,
         data_dir=data_dir,
+        feishu_groups=config.feishu.groups,
     )
     return handler
 
