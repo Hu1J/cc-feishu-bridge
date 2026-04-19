@@ -58,14 +58,26 @@ async def run_install_flow(config_path: str = "config.yaml") -> AppRegistrationR
 
 
 def save_config(result: AppRegistrationResult, config_path: str, bypass_accepted: bool = False) -> None:
-    """Write the app credentials and defaults to config.yaml."""
+    """Write the app credentials and defaults to config.yaml.
+
+    Preserves existing 'groups' and 'proactive' sections so re-running
+    the install flow does not wipe group registrations or proactive config.
+    """
+    # Merge with existing config to preserve groups, proactive, etc.
+    existing = {}
+    if Path(config_path).exists():
+        with open(config_path) as f:
+            existing = yaml.safe_load(f) or {}
+
     config = {
         "feishu": {
             "app_id": result.app_id,
             "app_secret": result.app_secret,
             "bot_name": "Claude",
-            "bot_open_id": "",  # 群聊 @CC 检测用，可后续手动填写或自动获取
+            "bot_open_id": "",  # auto-probed at startup; manual override goes here
             "domain": result.domain,
+            # Preserve existing groups (auto-registered group chat configs)
+            "groups": existing.get("feishu", {}).get("groups", {}),
         },
         "auth": {
             "allowed_users": [result.user_open_id],
@@ -78,6 +90,15 @@ def save_config(result: AppRegistrationResult, config_path: str, bypass_accepted
         "storage": {
             "db_path": str(Path(config_path).resolve().parent / "sessions.db"),
         },
+        "proactive": existing.get("proactive", {
+            "enabled": True,
+            "time_window_start": "08:00",
+            "time_window_end": "22:00",
+            "silence_threshold_minutes": 90,
+            "check_interval_minutes": 5,
+            "max_per_day": 3,
+            "cooldown_minutes": 60,
+        }),
         "bypass_accepted": bypass_accepted,
     }
 
