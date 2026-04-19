@@ -169,6 +169,34 @@ def save_config(path: str, feishu_app_id: str, feishu_app_secret: str,
         yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
 
 
+def register_group_config(config_path: str, group_id: str, entry: GroupConfigEntry | None = None) -> bool:
+    """Auto-register a group in the config file. Creates default entry if none provided.
+
+    Returns True if the group was newly registered, False if it already existed.
+    """
+    if entry is None:
+        entry = GroupConfigEntry()
+
+    with open(config_path) as f:
+        raw = yaml.safe_load(f)
+
+    groups = raw.get("feishu", {}).get("groups", {})
+    if group_id in groups:
+        return False  # already registered
+
+    groups[group_id] = {
+        "enabled": entry.enabled,
+        "require_mention": entry.require_mention,
+        "allow_from": entry.allow_from,
+    }
+    raw["feishu"]["groups"] = groups
+
+    with open(config_path, "w") as f:
+        yaml.dump(raw, f, default_flow_style=False, allow_unicode=True)
+
+    return True  # newly registered
+
+
 def accept_bypass_warning(config_path: str) -> None:
     """Record that the bypass permissions risk warning has been accepted."""
     with open(config_path) as f:

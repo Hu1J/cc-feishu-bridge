@@ -107,6 +107,7 @@ class MessageHandler:
         approved_directory: str,
         data_dir: str = "",
         feishu_groups: dict | None = None,
+        config_path: str | None = None,
     ):
         self.feishu = feishu_client
         self.auth = authenticator
@@ -118,6 +119,8 @@ class MessageHandler:
         self.data_dir = data_dir
         # Group config: group_id -> GroupConfigEntry (for per-group access control)
         self._feishu_groups = feishu_groups or {}
+        # Config path for auto-registering new groups
+        self._config_path = config_path
         self.memory_manager = get_memory_manager()
         self.memory_manager.set_system_prompt_stale_callback(self.claude.mark_system_prompt_stale)
         self._queue: asyncio.Queue[IncomingMessage] | None = None
@@ -142,13 +145,27 @@ class MessageHandler:
         return self._queue
 
     def _get_group_config(self, chat_id: str):
-        """Get GroupConfigEntry for a chat_id, if configured. Returns None if no per-group config."""
-        return self._feishu_groups.get(chat_id)
+        """Get GroupConfigEntry for a chat_id, auto-registering if first seen."""
+        if chat_id in self._feishu_groups:
+            return self._feishu_groups[chat_id]
+
+        # First time seeing this group — auto-register with defaults
+        from cc_feishu_bridge.config import GroupConfigEntry, register_group_config
+        entry = GroupConfigEntry()
+        self._feishu_groups[chat_id] = entry
+        if self._config_path:
+            try:
+                register_group_config(self._config_path, chat_id, entry)
+                logger.info(f"Auto-registered new group {chat_id} in config")
+            except Exception as ex:
+                logger.warning(f"Failed to auto-register group {chat_id} in config: {ex}")
+        return entry
 
     def _check_group_access(self, message: IncomingMessage) -> bool:
         """Check if a group chat message should be processed.
 
         Returns True if allowed, False if should be skipped.
+        Auto-registers new groups on first valid message.
         """
         if not message.is_group_chat:
             return True

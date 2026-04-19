@@ -71,7 +71,7 @@ class ColoredFormatter(logging.Formatter):
         return super().format(record)
 
 
-def create_handler(config, data_dir: str) -> MessageHandler:
+def create_handler(config, data_dir: str, config_path: str | None = None) -> MessageHandler:
     """Create MessageHandler with all dependencies wired up."""
     feishu = FeishuClient(
         app_id=config.feishu.app_id,
@@ -101,6 +101,7 @@ def create_handler(config, data_dir: str) -> MessageHandler:
         approved_directory=config.claude.approved_directory,
         data_dir=data_dir,
         feishu_groups=config.feishu.groups,
+        config_path=config_path,
     )
     return handler
 
@@ -245,7 +246,7 @@ def start_bridge(config_path: str, data_dir: str) -> None:
         sys.exit(1)
 
     config = load_config(config_path)
-    handler = create_handler(config, data_dir)
+    handler = create_handler(config, data_dir, config_path=config_path)
 
     ws_client = FeishuWSClient(
         app_id=config.feishu.app_id,

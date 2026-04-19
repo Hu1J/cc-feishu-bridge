@@ -289,3 +289,85 @@ class TestGroupAccessControl:
         msg.mention_bot = False
         msg.user_open_id = "ou_user"
         assert handler._check_group_access(msg) is True
+
+
+class TestGroupAutoRegistration:
+    """Test automatic group registration on first seen group."""
+
+    def test_unknown_group_auto_registered_in_memory(self):
+        """First time seeing a group, it gets auto-registered in memory."""
+        from cc_feishu_bridge.feishu.message_handler import MessageHandler
+        from cc_feishu_bridge.config import GroupConfigEntry
+
+        handler = MessageHandler(
+            feishu_client=MagicMock(),
+            authenticator=MagicMock(),
+            validator=MagicMock(),
+            claude=MagicMock(),
+            session_manager=MagicMock(),
+            formatter=MagicMock(),
+            approved_directory="/tmp",
+            feishu_groups={},
+            config_path=None,  # No config path — won't persist
+        )
+
+        msg = MagicMock()
+        msg.is_group_chat = True
+        msg.chat_id = "oc_new_group_123"
+        msg.mention_bot = True
+        msg.user_open_id = "ou_user"
+
+        # First call — group gets auto-registered
+        result = handler._check_group_access(msg)
+        assert result is True
+        assert "oc_new_group_123" in handler._feishu_groups
+        assert isinstance(handler._feishu_groups["oc_new_group_123"], GroupConfigEntry)
+        assert handler._feishu_groups["oc_new_group_123"].enabled is True
+        assert handler._feishu_groups["oc_new_group_123"].require_mention is True
+
+    def test_auto_register_with_config_path_calls_register_group_config(self):
+        """When config_path is set, auto-registration calls register_group_config."""
+        import tempfile
+        import os
+        from cc_feishu_bridge.feishu.message_handler import MessageHandler
+        from cc_feishu_bridge.config import GroupConfigEntry, register_group_config
+
+        # Create a temp config file
+        tmp = tempfile.NamedTemporaryFile(suffix=".yaml", delete=False)
+        tmp.write(b"feishu:\n  app_id: dummy\n  app_secret: dummy\n")
+        tmp.close()
+
+        try:
+            # Pre-register a group so we can test the new group gets added
+            register_group_config(tmp.name, "oc_existing_group", GroupConfigEntry())
+
+            handler = MessageHandler(
+                feishu_client=MagicMock(),
+                authenticator=MagicMock(),
+                validator=MagicMock(),
+                claude=MagicMock(),
+                session_manager=MagicMock(),
+                formatter=MagicMock(),
+                approved_directory="/tmp",
+                feishu_groups={},
+                config_path=tmp.name,
+            )
+
+            msg = MagicMock()
+            msg.is_group_chat = True
+            msg.chat_id = "oc_brand_new_group"
+            msg.mention_bot = True
+            msg.user_open_id = "ou_user"
+
+            result = handler._check_group_access(msg)
+            assert result is True
+
+            # Verify group was added to config file
+            import yaml
+            with open(tmp.name) as f:
+                cfg = yaml.safe_load(f)
+            assert "oc_brand_new_group" in cfg["feishu"]["groups"]
+            assert cfg["feishu"]["groups"]["oc_brand_new_group"]["enabled"] is True
+            assert cfg["feishu"]["groups"]["oc_brand_new_group"]["require_mention"] is True
+        finally:
+            os.unlink(tmp.name)
