@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +107,12 @@ class IncomingMessage:
     parent_id: str = ""    # 被引用消息的 ID（用户引用/回复某条消息时）
     thread_id: str = ""    # 所在线程的 ID
     raw_content: str = ""  # 原始 JSON 字符串（用于调试和记忆增强）
+    # 群聊相关字段
+    is_group_chat: bool = False      # 是否群聊（来自 message.chat_type）
+    chat_type: str = "p2p"         # 'p2p' | 'group'
+    mention_bot: bool = False        # 机器人是否被 @CC（来自 mentions[] 数组）
+    mention_ids: list[str] = field(default_factory=list)  # 所有被 @ 的用户 open_id 列表
+    group_name: str = ""            # 群名称（群聊时）
 
 
 class FeishuClient:
