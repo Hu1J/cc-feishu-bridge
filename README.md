@@ -17,6 +17,8 @@ Claude Code 飞书桥接插件 — 在飞书中与本地 Claude Code 对话。
 - **自动注册**：新群首次 @CC 时自动注册到 `config.yaml`，默认 require_mention=True
 - **per-group 配置**：可按群配置 `enabled`（启用/禁用）、`require_mention`（是否必须 @）、`allow_from`（白名单）
 
+> **⚠️ 必选权限**：群聊历史注入功能需要在飞书开放平台给机器人添加 `im:message.group_msg` 权限（`im:message:readonly` 不足），否则历史消息拉取返回 0 条。
+
 示例 `config.yaml` 配置：
 ```yaml
 feishu:

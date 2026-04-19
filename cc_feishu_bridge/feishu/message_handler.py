@@ -137,6 +137,8 @@ class MessageHandler:
         self._queue_loop_id: int | None = None
         # Group chat history: chat_id -> list of recent message contents (max 20)
         self._group_history: dict[str, list[str]] = {}
+        # Track which group chats we've already fetched history for (from Feishu API)
+        self._fetched_group_chats: set[str] = set()
         self._worker_task: asyncio.Task | None = None
         self._is_processing: bool = False  # True while worker is running or about to run
         self._current_message_id: str = ""
@@ -216,6 +218,35 @@ class MessageHandler:
 
         注意：所有命令（/开头）都不入队，直接处理以确保立即响应。
         """
+        # Group chat: record ALL messages to history FIRST, before any branching.
+        # This ensures commands (/stop, /new, etc.) also get stored so that
+        # when someone finally @mentions the bot, the full context is available.
+        # On first seeing a chat, proactively fetch recent history from Feishu API
+        # since WebSocket only delivers @mention messages.
+        if message.is_group_chat and message.content:
+            if message.chat_id not in self._fetched_group_chats:
+                self._fetched_group_chats.add(message.chat_id)
+                # Fetch last 20 messages from Feishu (ascending = chronological)
+                raw_messages = await self.feishu.get_chat_history(
+                    message.chat_id, limit=20, sort_type="ByCreateTimeAsc"
+                )
+                hist = self._group_history.setdefault(message.chat_id, [])
+                for msg in raw_messages:
+                    sender = msg.sender or {}
+                    user_id = sender.get("sender_id", {}).get("open_id", "") or sender.get("id", "")
+                    msg_content = self.feishu._extract_content(msg)
+                    if msg_content:
+                        hist.append(f"{user_id}: {msg_content}")
+                if len(hist) > 20:
+                    hist[:] = hist[-20:]
+                logger.debug(f"[GROUP_HISTORY][FETCH] chat_id={message.chat_id} fetched {len(raw_messages)} messages, hist_len={len(hist)}")
+
+            hist = self._group_history.setdefault(message.chat_id, [])
+            hist.append(f"{message.user_open_id}: {message.content}")
+            if len(hist) > 20:
+                hist[:] = hist[-20:]
+            logger.debug(f"[GROUP_HISTORY][STORE] chat_id={message.chat_id} user={message.user_open_id} content={message.content!r} history_len={len(hist)}")
+
         # Commands are handled immediately — do not queue
         # Strip @mention prefix so '@_user_1 /git' is recognized as /git command
         content = _strip_mention_prefix(message.content)
@@ -287,16 +318,6 @@ class MessageHandler:
         if not auth_result.authorized:
             logger.info(f"Ignoring message from unauthorized user: {message.user_open_id}")
             return
-
-        # Group chat: record ALL messages to history (even without @mention)
-        # so the bot has context when someone finally @mentions it.
-        if message.is_group_chat and message.content:
-            # Store full content in history
-            content = message.content
-            hist = self._group_history.setdefault(message.chat_id, [])
-            hist.append(f"{message.user_open_id}: {content}")
-            if len(hist) > 20:
-                hist[:] = hist[-20:]
 
         # Group chat: skip if bot was not @mentioned (no response to avoid spam)
         # Group access control check (per-group config: enabled, allow_from, require_mention)
@@ -876,6 +897,9 @@ class MessageHandler:
                 if hist:
                     history_text = "\n".join(hist)
                     group_history_prefix = f"[群聊上下文]\n{history_text}\n\n"
+                    logger.debug(f"[GROUP_HISTORY][INJECT] chat_id={message.chat_id} history_len={len(hist)} entries={hist!r}")
+                else:
+                    logger.debug(f"[GROUP_HISTORY][INJECT] chat_id={message.chat_id} NO_HISTORY (empty)")
 
             prefix_parts = [p for p in [group_history_prefix, media_prompt_prefix, quoted_content] if p]
             prefix = "\n".join(prefix_parts) + "\n" if prefix_parts else ""
@@ -1055,7 +1079,7 @@ class MessageHandler:
                     chat_id=message.chat_id,
                 )
             else:
-                self.sessions.update_session(session.session_id, cost=last_cost, message_increment=1)
+                self.sessions.update_session(session.session_id, cost=last_cost, message_increment=1, update_last_message=True)
 
             # 检测 sdk_session_id 变化，通知用户
             if sdk_session_id_from_query and session.sdk_session_id != sdk_session_id_from_query:

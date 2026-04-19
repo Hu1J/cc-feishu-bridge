@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 
 from cc_feishu_bridge.config import Config
 from cc_feishu_bridge.claude.integration import ClaudeIntegration
@@ -13,6 +13,11 @@ from cc_feishu_bridge.claude.session_manager import SessionManager
 from cc_feishu_bridge.feishu.client import FeishuClient
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow() -> datetime:
+    """Return current UTC time (naive, matching DB storage format)."""
+    return datetime.utcnow()
 
 PROMPT_TEMPLATE = """分析 {project_path} 项目：
 - 当前状况和进展（看 git log / 文件变更）
@@ -89,7 +94,8 @@ async def _check_and_notify(
 ) -> None:
     """Check all users and send proactive messages where conditions are met."""
     cfg = config.proactive
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    now = _utcnow()
+    today = now.strftime("%Y-%m-%d")
     already_notified: list = []
 
     for session in session_manager.get_all_users():
@@ -102,7 +108,7 @@ async def _check_and_notify(
 
         # Silence threshold check
         if session.last_message_at:
-            elapsed = (datetime.utcnow() - session.last_message_at).total_seconds() / 60
+            elapsed = (now - session.last_message_at).total_seconds() / 60
             if elapsed < cfg.silence_threshold_minutes:
                 continue
         else:
@@ -117,7 +123,7 @@ async def _check_and_notify(
 
         # Cooldown check: skip if a proactive message was sent recently
         if session.last_proactive_at:
-            cooldown = (datetime.utcnow() - session.last_proactive_at).total_seconds() / 60
+            cooldown = (now - session.last_proactive_at).total_seconds() / 60
             if cooldown < cfg.cooldown_minutes:
                 continue
 

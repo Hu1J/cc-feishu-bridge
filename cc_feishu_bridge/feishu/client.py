@@ -593,3 +593,43 @@ class FeishuClient:
             return str(content)
         except Exception:
             return content_str
+
+    async def get_chat_history(
+        self,
+        chat_id: str,
+        limit: int = 20,
+        sort_type: str = "ByCreateTimeDesc",
+    ) -> list[dict]:
+        """Fetch recent messages from a group chat via Feishu API.
+
+        Returns a list of message dicts with keys: message_id, chat_id, msg_type,
+        content, create_time, sender.
+        """
+        import lark_oapi as lark
+        client = self._get_client()
+        request = (
+            lark.im.v1.ListMessageRequest.builder()
+            .container_id_type("chat")
+            .container_id(chat_id)
+            .page_size(limit)
+            .sort_type(sort_type)
+            .build()
+        )
+        try:
+            resp = await asyncio.to_thread(client.im.v1.message.list, request)
+            logger.debug(f"[GROUP_HISTORY][API] chat_id={chat_id} code={resp.code} msg={getattr(resp, 'msg', '')}")
+            if not resp.success():
+                logger.warning(f"get_chat_history failed: code={resp.code} msg={getattr(resp, 'msg', '')}")
+                return []
+            # Log raw resp.data fields for debugging
+            if resp.data:
+                logger.debug(f"[GROUP_HISTORY][API] resp.data fields: {[k for k in dir(resp.data) if not k.startswith('_')]}")
+                logger.debug(f"[GROUP_HISTORY][API] resp.data items={getattr(resp.data, 'items', None)}")
+                logger.debug(f"[GROUP_HISTORY][API] resp.data has_more={getattr(resp.data, 'has_more', None)}")
+                logger.debug(f"[GROUP_HISTORY][API] resp.data page_token={getattr(resp.data, 'page_token', None)}")
+            items = resp.data.items if resp.data and hasattr(resp.data, 'items') else []
+            logger.debug(f"[GROUP_HISTORY][API] chat_id={chat_id} returned {len(items)} messages")
+            return items
+        except Exception as e:
+            logger.warning(f"get_chat_history error: {e}")
+            return []

@@ -53,9 +53,9 @@ class ProactiveConfig:
     time_window_start: str = "08:00"   # HH:MM 格式
     time_window_end: str = "22:00"      # HH:MM 格式
     silence_threshold_minutes: int = 90
-    check_interval_minutes: int = 5
+    check_interval_minutes: int = 30  # 至少30分钟检查一次，避免频繁打扰
     max_per_day: int = 3              # 0 表示不限次数
-    cooldown_minutes: int = 60        # 发完一条后，同会话冷却分钟数
+    cooldown_minutes: int = 120       # 发完一条后，同会话冷却分钟数（至少2小时）
 
 
 @dataclass
@@ -83,9 +83,9 @@ def _upgrade_config(path: str) -> None:
             "time_window_start": "08:00",
             "time_window_end": "22:00",
             "silence_threshold_minutes": 90,
-            "check_interval_minutes": 5,
+            "check_interval_minutes": 30,
             "max_per_day": 3,
-            "cooldown_minutes": 60,
+            "cooldown_minutes": 120,
         }
         changed = True
 
@@ -174,9 +174,9 @@ def save_config(path: str, feishu_app_id: str, feishu_app_secret: str,
             "time_window_start": "08:00",
             "time_window_end": "22:00",
             "silence_threshold_minutes": 90,
-            "check_interval_minutes": 5,
+            "check_interval_minutes": 30,
             "max_per_day": 3,
-            "cooldown_minutes": 60,
+            "cooldown_minutes": 120,
         },
         "bypass_accepted": bypass_accepted,
     }
