@@ -223,14 +223,6 @@ def confirm_risk_warning(config_path: str) -> bool:
             return False
 
 
-def _claude_available(cli_path: str) -> bool:
-    """Return True if the Claude CLI is found in PATH or at the given path."""
-    if cli_path != "claude":
-        # Explicit path — just check if file exists and is executable
-        return os.path.isfile(cli_path) and os.access(cli_path, os.X_OK)
-    return shutil.which("claude") is not None
-
-
 def start_bridge(config_path: str, data_dir: str) -> None:
     """Start the bridge: load config and run WebSocket connection."""
     # Acquire exclusive lock before starting — prevents multiple instances in the same directory
@@ -272,18 +264,6 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     signal.signal(signal.SIGTERM, cleanup)
 
     logger.info(f"Starting Feishu bridge (WS mode) — data: {data_dir}")
-
-    # Check Claude Code CLI availability before connecting — fail fast with a clear message
-    if not _claude_available(config.claude.cli_path):
-        print()
-        print("❌ Claude Code 未安装或不可用，bridge 无法启动。")
-        print()
-        print("请先安装 Claude Code：")
-        print("  npm install -g @anthropic-ai/claude-code")
-        print()
-        print("安装完成后重新运行 cc-feishu-bridge 即可。")
-        print()
-        sys.exit(1)
 
     # Auto-install Claude skill for file sending
     ensure_skill_installed()
