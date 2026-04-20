@@ -194,12 +194,17 @@ class FeishuClient:
             "sender_id": getattr(msg_obj.sender, "id", "") if msg_obj.sender else "",
         }
 
-    async def add_typing_reaction(self, message_id: str) -> str | None:
+    async def add_typing_reaction(self, message_id: str, emoji_type: str = "OK") -> str | None:
         """Add a typing emoji reaction to a message (Feishu typing indicator).
 
         Feishu has no dedicated typing REST API. The official plugin uses a
         'Typing' emoji reaction on the user's message instead.
         Silently returns None on failure — this is best-effort.
+
+        Args:
+            message_id: The message ID to react to.
+            emoji_type: The emoji type. Defaults to "OK" (processing start).
+                Use "DONE" for processing complete.
         """
         import lark_oapi as lark
         client = self._get_client()
@@ -210,7 +215,7 @@ class FeishuClient:
                 lark.im.v1.CreateMessageReactionRequestBody.builder()
                 .reaction_type(
                     lark.im.v1.model.emoji.Emoji.builder()
-                    .emoji_type("Typing")
+                    .emoji_type(emoji_type)
                     .build()
                 )
                 .build()
@@ -229,20 +234,13 @@ class FeishuClient:
         return None
 
     async def remove_typing_reaction(self, message_id: str, reaction_id: str) -> None:
-        """Remove a typing emoji reaction from a message. Silently ignores failures."""
-        import lark_oapi as lark
-        client = self._get_client()
-        request = (
-            lark.im.v1.DeleteMessageReactionRequest.builder()
-            .message_id(message_id)
-            .reaction_id(reaction_id)
-            .build()
-        )
+        """Mark processing as complete by adding DONE reaction (keeps OK reaction).
+
+        Does NOT remove the 'OK' reaction — both OK and DONE coexist when
+        processing is complete. Silently ignores failures.
+        """
         try:
-            await asyncio.to_thread(
-                client.im.v1.message_reaction.delete,
-                request,
-            )
+            await self.add_typing_reaction(message_id, emoji_type="DONE")
         except Exception:
             pass
 
