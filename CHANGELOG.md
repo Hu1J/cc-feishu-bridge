@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-20
+
+### Added
+
+- **MCP Cron Scheduler**：新增 7 个 BridgeCron* MCP 工具（Create/List/Delete/Pause/Resume/Trigger/Logs），支持 cron 表达式、间隔和一次性任务，自动通过 Feishu 推送执行结果
+- **Feishu 独立消息发送**：新增 `send_post()` 和 `send_interactive_card()` 方法，无需 reply_to_message_id 即可发送独立消息
+- **Cron 日志全链路追踪**：执行日志记录每个阶段（JOB_TRIGGERED → CLAUDE_QUERY → FEISHU_DELIVERY），包含真实总耗时
+
+### Removed
+
+- **ProactiveScheduler**：移除沉默检测主动推送功能，功能已被 BridgeCron 取代
+
 ## [0.4.3] - 2026-04-20
 
 ### Fixed
