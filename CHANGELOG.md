@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-04-20
+
+### Fixed
+
+- **Group @mention 修复**：修复 lark-oapi 返回的 `Message` 对象类型导致 `mentions` 检测失效的问题，改用 `getattr` 安全访问；增加 `@_user_\d+` 正则回退检测
+- **Proactive scheduler daily cap**：改为按用户维度聚合所有 session 的发送次数，而非按 session 独立计数
+- **Group history sender 解析**：修复 `get_chat_history` 返回的 lark-oapi `Sender` 对象属性访问方式
+
+### Changed
+
+- **Typing emoji 改动**：开始处理 → 发 "OK" emoji，完成 → 发 "DONE" emoji（两者共存）
+- **启动检查**：移除 Claude CLI 安装检测，依赖 SDK 自带的 Claude Code
+
 ## [0.4.2] - 2026-04-19
 
 ### Fixed
