@@ -425,6 +425,10 @@ def start_bridge(config_path: str, data_dir: str) -> None:
     # Register daily skill optimization scan
     _register_skill_optimization_job(data_dir, cron_scheduler)
 
+    # Register nightly dream job (memory refinement at 3am)
+    from cc_feishu_bridge.dream import register_dream_job
+    register_dream_job(data_dir)
+
     # CLI 进程在第一条消息到达时才会建立连接（_ensure_connected 懒加载）。
     # SDK 通过 continue_conversation=True 自动维护 session，无需手动 fork。
     ws_client.start()
