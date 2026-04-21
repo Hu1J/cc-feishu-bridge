@@ -170,6 +170,24 @@ class _DiffMarker:
         self.tool_input = tool_input  # 原始 JSON 字符串
         self.card = card              # 预构建的飞书卡片 JSON
 
+    def render(self) -> str:
+        """渲染为纯文本 diff（cron verbose 模式使用）。"""
+        data = json.loads(self.tool_input)
+        file_path = data.get("file_path", "unknown")
+        if self.tool_name == "Edit":
+            old_str = data.get("old_string", "")
+            new_str = data.get("new_string", "")
+        elif self.tool_name == "Write":
+            old_str = ""
+            new_str = data.get("content", "")
+        else:
+            return f"**{self.tool_name}** — `{file_path}`"
+
+        diff = colorize_diff(old_str, new_str)
+        lines = [f"**{file_path}**\n"]
+        lines.append(f"```diff\n{diff}\n```")
+        return "\n".join(lines)
+
 
 def build_edit_marker(tool_input_json: str) -> _DiffMarker:
     """从 Edit 工具的 tool_input JSON 构建 marker。"""
