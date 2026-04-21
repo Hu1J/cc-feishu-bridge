@@ -641,14 +641,30 @@ async def _run_job(job: dict, config: Config, data_dir: str, running_jobs: set[s
                 if is_verbose:
                     from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
                     from cc_feishu_bridge.format.edit_diff import _DiffMarker, _MemoryCardMarker
+                    from cc_feishu_bridge.format.questionnaire_card import _AskUserQuestionMarker, format_questionnaire_card
                     formatter = ReplyFormatter()
                     result = formatter.format_tool_call(claude_msg.tool_name, claude_msg.tool_input)
-                    if isinstance(result, (_DiffMarker, list)):
-                        pass  # Skip diff markers — no Feishu card support in cron
+                    if isinstance(result, _DiffMarker):
+                        await feishu.send_card(chat_id, result.card)
+                    elif isinstance(result, list):
+                        for marker in result:
+                            if isinstance(marker, _DiffMarker):
+                                await feishu.send_card(chat_id, marker.card)
                     elif isinstance(result, _MemoryCardMarker):
-                        await feishu.send_post(chat_id, result.render())
+                        md = result.render()
+                        if md:
+                            await feishu.send_interactive_card(chat_id, md)
+                    elif isinstance(result, _AskUserQuestionMarker):
+                        card = format_questionnaire_card(result)
+                        if card:
+                            await feishu.send_card(chat_id, card)
                     else:
-                        await feishu.send_post(chat_id, str(result))
+                        # Plain string: use same card/post decision as main conversation
+                        text = str(result)
+                        if formatter.should_use_card(text):
+                            await feishu.send_interactive_card(chat_id, text)
+                        else:
+                            await feishu.send_post(chat_id, text)
                 await _stream_log(claude_msg)
             elif claude_msg.content:
                 await _stream_log(claude_msg)
