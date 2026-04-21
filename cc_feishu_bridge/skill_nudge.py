@@ -48,29 +48,31 @@ def _ensure_skills_git_repo(skills_dir: Path) -> None:
     if not skills_dir.exists():
         skills_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check if it's a git repo
-    result = subprocess.run(
-        ["git", "rev-parse", "--git-dir"],
-        cwd=str(skills_dir),
-        capture_output=True, text=True,
-    )
-    is_git = result.returncode == 0
+    # Check if skills_dir itself is a git repo (not a parent repo)
+    git_path = skills_dir / ".git"
+    is_git = git_path.exists()
 
     if not is_git:
         subprocess.run(["git", "init"], cwd=str(skills_dir), capture_output=True)
-        readme_path = skills_dir / "README.md"
-        readme_path.write_text(README_CONTENT, encoding="utf-8")
-        subprocess.run(
-            ["git", "add", "README.md"],
-            cwd=str(skills_dir),
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "commit", "-m", "初始化 Skills 目录"],
-            cwd=str(skills_dir),
-            capture_output=True,
-        )
+        is_git = True
         logger.info(f"[skill_nudge] initialized git repo at {skills_dir}")
+
+    # Always ensure README exists
+    readme_path = skills_dir / "README.md"
+    if not readme_path.exists():
+        readme_path.write_text(README_CONTENT, encoding="utf-8")
+        if is_git:
+            subprocess.run(
+                ["git", "add", "README.md"],
+                cwd=str(skills_dir),
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "commit", "-m", "初始化 Skills 目录"],
+                cwd=str(skills_dir),
+                capture_output=True,
+            )
+            logger.info(f"[skill_nudge] created README at {skills_dir}")
 
 
 @dataclass
