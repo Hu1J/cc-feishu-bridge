@@ -1167,13 +1167,15 @@ class MessageHandler:
             else:
                 self.sessions.update_session(session.session_id, cost=last_cost, message_increment=1, update_last_message=True)
 
-            # 检测 sdk_session_id 变化，通知用户
-            if sdk_session_id_from_query and session.sdk_session_id != sdk_session_id_from_query:
+            # 检测 sdk_session_id 变化，通知用户（strip 消除隐藏字符；排除首次 None->有值的情况）
+            new_sid = (sdk_session_id_from_query or "").strip()
+            old_sid = (session.sdk_session_id or "").strip()
+            if new_sid and old_sid and new_sid != old_sid:
                 logger.info(f"[_run_query] sdk_session_id changed: {session.sdk_session_id!r} -> {sdk_session_id_from_query!r}")
-                self.sessions.update_sdk_session_id(session.session_id, sdk_session_id_from_query)
+                self.sessions.update_sdk_session_id(session.session_id, new_sid)
                 await self._safe_send(
                     message.chat_id, message.message_id,
-                    f"🔄 检测到新 Session，已自动切换\n新 Session ID: `{sdk_session_id_from_query}`",
+                    f"🔄 检测到新 Session，已自动切换\n新 Session ID: `{new_sid}`",
                     log_reply=False,
                 )
 
