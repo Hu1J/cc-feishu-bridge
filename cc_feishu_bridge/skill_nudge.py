@@ -318,12 +318,12 @@ async def poll_skill_changes_and_notify(
     # Save current state
     state_file.write_text(json.dumps(current_state, ensure_ascii=False), encoding="utf-8")
 
-    if not changed:
-        return
-
-    # Always ensure symlinks exist when there are changes (idempotent, safe to call on every tick)
+    # Always ensure symlinks on every tick (idempotent — safe to call repeatedly)
     symlink_dir = Path.home() / ".claude" / "skills"
     _ensure_symlinks(skills_dir, symlink_dir)
+
+    if not changed:
+        return
 
     # Send notification
     parts = []
