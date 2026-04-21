@@ -63,23 +63,20 @@ def make_nudge(config: SkillNudgeConfig) -> SkillNudge:
 
 
 # Review prompt shown to Claude Code when nudge fires
-# Claude writes proposed skills to a staging dir; we then diff and apply
+# Claude writes proposed skills to a staging dir; we then scan and apply
 SKILL_NUDGE_PROMPT = """\
-回顾上面的对话，思考以下问题：
+根据当前对话历史，判断是否有值得创建或更新的 Skill。
 
-1. 这段对话中有没有值得沉淀为可复用技能（Skill）的做法？
-   适合存为 Skill 的场景：
-   - 解决了非平凡问题，且解决方法可推广
-   - 发现了一种新的工作流程或技巧
-   - 克服了错误并找到了正确方法
-   - 用户要求记住某个流程
+适合存为 Skill 的场景：
+- 解决了非平凡问题，且解决方法可推广
+- 发现了一种新的工作流程或技巧
+- 克服了错误并找到了正确方法
+- 用户要求记住某个流程
 
-2. 如果已有相关 Skill，有没有学到新东西可以更新它？
-
-3. 如果要创建/更新 Skill，请先把完整内容写入临时目录（不要直接写入 ~/.claude/skills/）：
-   - 临时文件路径：/tmp/skill_review_proposed/<skill-name>/SKILL.md
-   - 格式：YAML frontmatter (name/description/author/version) + Markdown body
-   - author 字段填你的用户名，表示这是你自己创建的
+如果有值得创建/更新的 Skill，请把完整内容写入临时目录（不要直接写入 ~/.claude/skills/）：
+- 临时文件路径：/tmp/skill_review_proposed/<skill-name>/SKILL.md
+- 格式：YAML frontmatter (name/description/author/version) + Markdown body
+- author 字段填你的用户名，表示这是你自己创建的
 
 注意：
 - 只创建真正有价值的 Skill，不要为了"有"而创建
@@ -106,7 +103,6 @@ def _parse_skill_meta(content: str) -> tuple[str, str, str]:
 
 async def trigger_skill_review(
     make_claude_query: Callable[..., Awaitable[tuple]],
-    project_path: str,
     nudge: SkillNudge,
     chat_id: str | None = None,
     send_to_feishu: Callable[[str, str], Awaitable[None]] | None = None,
@@ -117,7 +113,6 @@ async def trigger_skill_review(
     Args:
         make_claude_query: a callable that runs a Claude query and returns
             (response_text, session_id, cost)
-        project_path: the current project path for Claude context
         nudge: the SkillNudge instance to manage counter and pending state
         chat_id: Feishu chat_id to deliver results to (optional)
         send_to_feishu: async callable(chat_id, text) to send a Feishu message (optional)
@@ -131,26 +126,16 @@ async def trigger_skill_review(
     skills_dir = Path.home() / ".claude" / "skills"
     proposed_dir = Path("/tmp/skill_review_proposed")
 
-    # Snapshot existing skills: path -> (mtime, content)
-    existing_snap: dict[str, tuple[float, str]] = {}
-    if skills_dir.exists():
-        for f in skills_dir.rglob("SKILL.md"):
-            try:
-                existing_snap[str(f)] = (f.stat().st_mtime, f.read_text(encoding="utf-8"))
-            except OSError:
-                pass
-
     # Clean up any previous proposed files
     if proposed_dir.exists():
         shutil.rmtree(proposed_dir)
     proposed_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        prompt = f"项目路径：{project_path}\n\n{SKILL_NUDGE_PROMPT}"
-        response, _, _ = await make_claude_query(prompt=prompt)
+        response, _, _ = await make_claude_query(prompt=SKILL_NUDGE_PROMPT)
         logger.info(f"[skill_nudge] review done: {response[:200] if response else '(empty)'}")
 
-        # Diff proposed dir against existing snap to find changes
+        # Scan staging dir: each file is a proposed skill
         auto_changes: list[dict] = []   # user-created, apply directly
         pending_changes: list[dict] = []  # community, require confirmation
 
@@ -163,11 +148,14 @@ async def trigger_skill_review(
                 skill_name, description, author = _parse_skill_meta(new_content)
                 skill_key = skills_dir / f.parent.name / "SKILL.md"
                 is_new = not skill_key.exists()
-                is_updated = (
-                    not is_new
-                    and skill_key.exists()
-                    and existing_snap.get(str(skill_key), ("", ""))[1] != new_content
-                )
+                # Compare with current file content to detect updates
+                is_updated = False
+                if not is_new and skill_key.exists():
+                    try:
+                        current_content = skill_key.read_text(encoding="utf-8")
+                        is_updated = current_content != new_content
+                    except OSError:
+                        pass
                 if not is_new and not is_updated:
                     continue
 

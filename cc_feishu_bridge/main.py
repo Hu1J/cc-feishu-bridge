@@ -68,18 +68,14 @@ def _register_skill_optimization_job(data_dir: str, scheduler) -> None:
 
     try:
         create_job(
-            prompt=(
-                "【Skill 优化扫描】\n\n"
-                "以下是你目前所有的 Skills，请进行全面审查并给出优化建议。\n\n"
-                + prompt
-            ),
+            prompt=prompt,
             schedule="0 9 * * *",  # 每天早上9点
             chat_id=chat_id,
             name="Skill 优化扫描",
             repeat=None,
             data_dir=data_dir,
         )
-        logger.info(f"[skill_optimize] registered daily scan for {len(skill_summaries)} skills")
+        logger.info("[skill_optimize] registered daily scan")
     except Exception as e:
         logger.warning(f"[skill_optimize] failed to register: {e}")
 
