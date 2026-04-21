@@ -36,78 +36,11 @@ from cc_feishu_bridge.claude.cron_tools import set_cron_scheduler
 logger = logging.getLogger(__name__)
 
 
-def _build_skill_review_prompt(skills: list[dict]) -> str:
-    """Build the skill review prompt from a list of skill summaries."""
-    lines = [
-        "你是一个 Skill 优化专家。请审查以下所有 Skills，对每个 Skill 给出优化建议。\n",
-    ]
-    for s in skills:
-        lines.append(f"## Skill: {s['name']}")
-        lines.append(f"路径: {s['path']}")
-        lines.append(f"描述: {s['description']}")
-        lines.append(f"作者: {s.get('author', '(未知)')}")
-        lines.append(f"正文:\n{s['body'][:2000]}")
-        lines.append("---")
-    lines.append("\n请对每个 Skill 分析：")
-    lines.append("1. instructions 是否清晰准确？")
-    lines.append("2. 是否有过时信息？")
-    lines.append("3. 能否更简洁？")
-    lines.append("4. 综合评分（1-10）和优化建议\n")
-    lines.append("格式：对每个 Skill 输出\n**Skill名**: 评分 | 优化建议（50字内）")
-    return "\n".join(lines)
-
-
 def _register_skill_optimization_job(data_dir: str, scheduler) -> None:
     """Register a daily skill optimization scan job.
 
-    Scans ~/.claude/skills/ for all SKILL.md files, builds a review prompt,
-    and creates a cron job that delivers results to the active user's chat.
+    Creates a cron job that delivers results to the active user's chat.
     """
-    import os
-    from pathlib import Path
-
-    skills_dir = Path.home() / ".claude" / "skills"
-    if not skills_dir.exists():
-        logger.info("[skill_optimize] skills dir not found, skipping")
-        return
-
-    skill_summaries = []
-    for skill_md in skills_dir.rglob("SKILL.md"):
-        try:
-            content = skill_md.read_text(encoding="utf-8")
-        except Exception:
-            continue
-
-        # Parse frontmatter
-        name = skill_md.parent.name
-        description = ""
-        author = ""
-        body = content
-
-        if content.startswith("---"):
-            parts = content.split("---", 2)
-            if len(parts) >= 3:
-                fm_text, _, body = parts
-                for line in fm_text.splitlines():
-                    if line.startswith("name:"):
-                        name = line.split("name:", 1)[1].strip()
-                    elif line.startswith("description:"):
-                        description = line.split("description:", 1)[1].strip()
-                    elif line.startswith("author:"):
-                        author = line.split("author:", 1)[1].strip()
-
-        skill_summaries.append({
-            "name": name,
-            "path": str(skill_md),
-            "description": description,
-            "author": author,
-            "body": body.strip(),
-        })
-
-    if not skill_summaries:
-        logger.info("[skill_optimize] no skills found, skipping")
-        return
-
     # Get chat_id from active session
     from cc_feishu_bridge.cron_scheduler import list_jobs, create_job
     chat_id = _get_active_chat_id(data_dir)
@@ -121,7 +54,17 @@ def _register_skill_optimization_job(data_dir: str, scheduler) -> None:
         logger.info("[skill_optimize] job already registered, skipping")
         return
 
-    prompt = _build_skill_review_prompt(skill_summaries)
+    prompt = """【Skill 优化扫描】
+
+请扫描 ~/.claude/skills/ 目录下所有 Skill，分析哪些值得更新或新建。
+
+**更新规则：**
+- 如果某个 Skill 的 author 字段是你的用户名，直接更新写入 ~/.claude/skills/
+- 如果 author 字段不是你的用户名（社区 Skill），只写入 /tmp/skill_review_proposed/，不要直接写入 skills 目录，通知用户确认后再写入
+
+**格式：** YAML frontmatter (name/description/author/version) + Markdown body
+
+请给出优化建议列表。"""
 
     try:
         create_job(
