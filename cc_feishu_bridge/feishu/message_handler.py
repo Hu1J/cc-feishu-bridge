@@ -17,7 +17,7 @@ from cc_feishu_bridge.claude.memory_manager import get_memory_manager, MEMORY_SY
 from cc_feishu_bridge.claude.feishu_file_tools import FEISHU_FILE_GUIDE
 from cc_feishu_bridge.claude.cron_tools import CRON_SYSTEM_GUIDE
 from cc_feishu_bridge.claude.session_manager import SessionManager
-from cc_feishu_bridge.skill_nudge import SkillNudge, SkillSymlinkHook, trigger_skill_review
+from cc_feishu_bridge.skill_nudge import SkillNudge, trigger_skill_review
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 from cc_feishu_bridge.format.edit_diff import _DiffMarker, _MemoryCardMarker
 from cc_feishu_bridge.format.questionnaire_card import _AskUserQuestionMarker, format_questionnaire_card
@@ -140,11 +140,6 @@ class MessageHandler:
         self._skill_nudge = skill_nudge
         # Per-chat pending community skill updates: chat_id -> list of pending skill changes
         self._pending_skill_updates: dict[str, list] = {}
-        # Auto-symlink hook: watches ~/.cc-feishu-bridge/skills/ and links to ~/.claude/skills/
-        self._skill_symlink_hook = SkillSymlinkHook(
-            skills_dir=Path(self.data_dir) / "skills",
-            symlink_dir=Path.home() / ".claude" / "skills",
-        )
         self._queue: asyncio.Queue[IncomingMessage] | None = None
         self._queue_loop_id: int | None = None
         # Group chat history: chat_id -> list of recent message contents (max 20)
@@ -358,7 +353,6 @@ class MessageHandler:
 
     async def _worker_loop(self) -> None:
         """串行出队并处理消息。"""
-        self._skill_symlink_hook.start()
         try:
             while True:
                 try:

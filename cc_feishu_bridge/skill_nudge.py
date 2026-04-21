@@ -117,100 +117,29 @@ def make_nudge(config: SkillNudgeConfig) -> SkillNudge:
     return SkillNudge(config=config)
 
 
-class SkillSymlinkHook:
-    """Monitor skills_dir and auto-create symlinks in symlink_dir.
+def _ensure_symlinks(skills_dir: Path, symlink_dir: Path | None = None) -> None:
+    """Ensure all skills in skills_dir have a corresponding symlink in symlink_dir.
 
-    Uses watchdog to detect when new skill directories (containing SKILL.md) are created,
-    then automatically symlinks the entire directory to symlink_dir/<skill-name>.
+    Symlinks are created in ~/.claude/skills/ by default.
+    Idempotent: existing correct symlinks are left as-is.
     """
-
-    def __init__(
-        self,
-        skills_dir: Path | None = None,
-        symlink_dir: Path | None = None,
-    ) -> None:
-        self.skills_dir = skills_dir or (Path.home() / ".cc-feishu-bridge" / "skills")
-        self.symlink_dir = symlink_dir or (Path.home() / ".claude" / "skills")
-        self._observer: "watchdog.Observer | None" = None
-        self._lock = threading.Lock()
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def start(self) -> None:
-        """Start watching skills_dir in a background thread."""
-        with self._lock:
-            if self._observer is not None:
-                return
-            self._ensure_symlinks()
-            from watchdog.observers import Observer
-            from watchdog.events import FileSystemEventHandler, FileSystemEvent
-            handler = _SymlinkHandler(self)
-            self._observer = Observer()
-            self._observer.schedule(handler, str(self.skills_dir), recursive=False)
-            self._observer.daemon = True
-            self._observer.start()
-            logger.info(f"[SkillSymlinkHook] started — watching {self.skills_dir}")
-
-    def stop(self) -> None:
-        """Stop the watcher."""
-        with self._lock:
-            if self._observer is None:
-                return
-            self._observer.stop()
-            self._observer.join(timeout=5)
-            self._observer = None
-            logger.info("[SkillSymlinkHook] stopped")
-
-    def ensure_symlinks(self) -> None:
-        """Ensure all current skills have symlinks (idempotent)."""
-        self._ensure_symlinks()
-
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
-
-    def _ensure_symlinks(self) -> None:
-        """Create symlinks for all skills that don't have one yet."""
-        if not self.skills_dir.exists():
-            return
-        self.symlink_dir.mkdir(parents=True, exist_ok=True)
-        for skill_path in self.skills_dir.iterdir():
-            if not skill_path.is_dir():
-                continue
-            skill_md = skill_path / "SKILL.md"
-            if not skill_md.exists():
-                continue
-            symlink_path = self.symlink_dir / skill_path.name
-            if symlink_path.exists() or symlink_path.is_symlink():
-                if symlink_path.resolve() == skill_path.resolve():
-                    continue
-                symlink_path.unlink()
-            symlink_path.symlink_to(skill_path)
-            logger.info(f"[SkillSymlinkHook] linked {skill_path.name}")
-
-    def _on_skill_created(self, skill_name: str) -> None:
-        """Called by the watchdog handler when a new skill dir is detected."""
-        skill_dir = self.skills_dir / skill_name
-        if not (skill_dir / "SKILL.md").exists():
-            return
-        symlink_path = self.symlink_dir / skill_name
+    symlink_dir = symlink_dir or (Path.home() / ".claude" / "skills")
+    if not skills_dir.exists():
+        return
+    symlink_dir.mkdir(parents=True, exist_ok=True)
+    for skill_path in skills_dir.iterdir():
+        if not skill_path.is_dir():
+            continue
+        skill_md = skill_path / "SKILL.md"
+        if not skill_md.exists():
+            continue
+        symlink_path = symlink_dir / skill_path.name
         if symlink_path.exists() or symlink_path.is_symlink():
+            if symlink_path.resolve() == skill_path.resolve():
+                continue
             symlink_path.unlink()
-        symlink_path.symlink_to(skill_dir)
-        logger.info(f"[SkillSymlinkHook] linked new skill: {skill_name}")
-
-
-class _SymlinkHandler:
-    """FileSystemEventHandler that bridges watchdog events to SkillSymlinkHook."""
-
-    def __init__(self, hook: SkillSymlinkHook) -> None:
-        self._hook = hook
-
-    def on_created(self, event: "FileSystemEvent") -> None:
-        if event.is_directory:
-            self._hook._on_skill_created(event.src_path.split("/")[-1])
+        symlink_path.symlink_to(skill_path)
+        logger.info(f"[skill_nudge] symlinked {skill_path.name}")
 
 
 # Review prompt shown to Claude Code when nudge fires
@@ -383,6 +312,12 @@ async def poll_skill_changes_and_notify(
 
     if not changed:
         return
+
+    # Only symlink when new skills are created
+    new_skills = [c for c in changed if c["action"] == "🆕 新建"]
+    if new_skills:
+        symlink_dir = Path.home() / ".claude" / "skills"
+        _ensure_symlinks(skills_dir, symlink_dir)
 
     # Send notification
     parts = []
