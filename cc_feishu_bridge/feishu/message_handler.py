@@ -168,9 +168,8 @@ class MessageHandler:
     def _trigger_memory_review(self, message: IncomingMessage, response_text: str) -> None:
         """Monitor memory changes after each conversation ends.
 
-        Asks Claude if anything worth remembering happened. If yes, the bridge
-        calls MemoryAddProj to write it. Then diffs before/after state and
-        notifies the user only if memory actually changed.
+        Asks Claude to consider updating memory via MCP tools if it wants.
+        The bridge monitors DB before/after and notifies only if memory actually changed.
         """
         project_path = getattr(self, "_current_project_path", "")
         mm = self.memory_manager
@@ -196,63 +195,18 @@ class MessageHandler:
             f"项目路径：{project_path}\n\n"
             f"对话刚结束，用户说：{message.content[:200]}\n\n"
             f"Claude 的回复摘要：{response_text[:300] if response_text else '(无文本回复)'}\n\n"
-            "这段对话中有没有值得写入项目记忆或用户偏好的信息？\n"
-            "如果需要写入项目记忆，请输出：\n"
-            "[type=proj]\n"
-            "title：一条简短的标题（不超过20字）\n"
-            "content：记忆内容（具体、完整，100字以内）\n"
-            "keywords：关键词，用逗号分隔（3-5个）\n\n"
-            "如果需要写入用户偏好，请输出：\n"
-            "[type=user]\n"
-            "title：一条简短的标题（不超过20字）\n"
-            "content：偏好内容（具体、完整，100字以内）\n"
-            "keywords：关键词，用逗号分隔（3-5个）\n\n"
-            "如果没什么值得记住的，直接回复「无需更新」。\n"
+            "如果这段对话中有值得记住的信息，请调用 MCP 工具写入记忆：\n"
+            "- 项目记忆：mcp__memory__MemoryAddProj (title/content/keywords)\n"
+            "- 用户偏好：mcp__memory__MemoryAddUser (title/content/keywords)\n"
+            "如果没有值得记住的，什么都不需要做。\n"
         )
 
         async def do_review():
             try:
-                result, _, _ = await self.claude.query(prompt=prompt)
-                if not result or result.strip() == "无需更新":
-                    return  # CC decided nothing worth remembering
+                await self.claude.query(prompt=prompt)
+                # CC may or may not have called MCP tools — we just monitor DB
 
-                # Parse CC's response: detect [type=proj] or [type=user]
-                mem_type = "proj"
-                title, content, keywords = "", "", ""
-                for line in result.strip().splitlines():
-                    if "[type=proj]" in line:
-                        mem_type = "proj"
-                    elif "[type=user]" in line:
-                        mem_type = "user"
-                    elif line.startswith("title：") or line.startswith("title:"):
-                        title = line.split("：", 1)[-1].strip() or line.split(":", 1)[-1].strip()
-                    elif line.startswith("content：") or line.startswith("content:"):
-                        content = line.split("：", 1)[-1].strip() or line.split(":", 1)[-1].strip()
-                    elif line.startswith("keywords：") or line.startswith("keywords:"):
-                        keywords = line.split("：", 1)[-1].strip() or line.split(":", 1)[-1].strip()
-
-                if not title or not content:
-                    logger.warning(f"[_trigger_memory_review] invalid response: {result[:100]}")
-                    return
-
-                # Write memory: CC decides type, bridge executes via MCP tool
-                added = False
-                if mm:
-                    try:
-                        if mem_type == "proj" and project_path:
-                            mm.add_project_memory(project_path, title, content, keywords)
-                            added = True
-                        elif mem_type == "user" and user_open_id:
-                            mm.add_preference(user_open_id, title, content, keywords)
-                            added = True
-                    except Exception as e:
-                        logger.warning(f"[_trigger_memory_review] failed to add memory: {e}")
-                        return
-
-                if not added:
-                    return
-
-                # Diff: check if new entries appeared in either store
+                # Check if anything changed
                 after_proj_ids = before_proj_ids
                 after_user_ids = before_user_ids
                 if mm:
@@ -272,12 +226,31 @@ class MessageHandler:
                 new_proj = after_proj_ids - before_proj_ids
                 new_user = after_user_ids - before_user_ids
 
-                if (new_proj or new_user) and message.chat_id:
+                if not new_proj and not new_user:
+                    return  # nothing changed
+
+                # Fetch details of new entries for notification
+                new_entries = []
+                if mm:
+                    try:
+                        if new_proj and project_path:
+                            all_mems = mm.get_project_memories(project_path)
+                            new_entries.extend([m for m in all_mems if m.id in new_proj])
+                    except Exception:
+                        pass
+                    try:
+                        all_prefs = mm.get_all_preferences() if not user_open_id else mm.get_preferences_by_user(user_open_id)
+                        new_entries.extend([p for p in all_prefs if p.id in new_user])
+                    except Exception:
+                        pass
+
+                if new_entries and message.chat_id:
+                    parts = [f"**{e.title}**" for e in new_entries]
                     kind = "项目记忆" if new_proj else "用户偏好"
                     try:
                         await self._safe_send(
                             message.chat_id, message.message_id,
-                            f"💡 {kind}已自主更新：\n\n**{title}**\n{content}",
+                            f"💡 {kind}已自主更新：{'、'.join(parts)}",
                         )
                     except Exception as send_err:
                         logger.warning(f"[_trigger_memory_review] safe_send failed: {send_err}")
