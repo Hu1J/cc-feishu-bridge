@@ -210,3 +210,61 @@ class _MemoryCardMarker:
         self.card_type = card_type      # add | update | delete | list | search
         self.entries = entries          # list[dict] — 查库后的实际条目
         self.tool_input = tool_input    # 原始 JSON 入参
+
+    def render(self) -> str:
+        """渲染为普通 markdown 字符串（不含 Feishu Interactive Card）。"""
+        import json as _json
+        try:
+            args = _json.loads(self.tool_input) if self.tool_input else {}
+        except _json.JSONDecodeError:
+            args = {}
+
+        short = self.tool_name.replace("mcp__memory__", "")
+        scope = "proj" if "Proj" in short else "user"
+        card_type = self.card_type or ""
+
+        header = f"🧠 **{short}**"
+        if card_type == "search":
+            q = args.get("query", "")
+            header += f"  查询: 「{q}」"
+        if scope == "proj":
+            pp = args.get("project_path", "")
+            if pp:
+                header += f"  项目: {pp.split('/')[-1] or pp}"
+        elif args.get("user_open_id"):
+            header += f"  用户: {args['user_open_id']}"
+
+        def _esc(s: str) -> str:
+            return s.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
+
+        if card_type in ("add", "update"):
+            lines = f"{header}\n\n| 标题 | 内容摘要 | 关键词 |\n|------|----------|--------|\n"
+            for e in self.entries:
+                title = _esc(e.get("title", "")[:60])
+                content = _esc(e.get("content", "")[:50])
+                keywords = _esc(e.get("keywords", ""))
+                lines += f"| {title} | {content} | {keywords} |\n"
+            return lines
+        elif card_type in ("list", "search"):
+            total = len(self.entries)
+            header += f"（共 {total} 条）"
+            lines = f"{header}\n\n| # | 标题 | 内容摘要 | 关键词 | ID |\n|---|------|----------|--------|---|\n"
+            for i, e in enumerate(self.entries, 1):
+                title = _esc(e.get("title", "")[:40])
+                content = _esc(e.get("content", "")[:50])
+                keywords = _esc(e.get("keywords", ""))
+                mid = f"`{e.get('id', '')}`"
+                lines += f"| {i} | {title} | {content} | {keywords} | {mid} |\n"
+            return lines
+        elif card_type == "delete":
+            deleted_id = self.entries[0].get("id", "") if self.entries else ""
+            return f"{header}\n\n| ID |\n|------|\n| `{deleted_id}` |\n"
+
+        # fallback: 参数表
+        lines = f"{header}\n\n| 参数 | 值 |\n|------|----|\n"
+        for k, v in args.items():
+            v_str = _esc(str(v))
+            if len(v_str) > 80:
+                v_str = v_str[:80] + "…"
+            lines += f"| `{k}` | {v_str} |\n"
+        return lines
