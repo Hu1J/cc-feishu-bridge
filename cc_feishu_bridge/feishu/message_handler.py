@@ -1063,6 +1063,8 @@ class MessageHandler:
                                     make_claude_query=lambda p: self.claude.query(prompt=p),
                                     project_path=getattr(self, "_current_project_path", ""),
                                     nudge=nudge,
+                                    chat_id=message.chat_id,
+                                    send_to_feishu=lambda cid, text: self._safe_send(cid, message.message_id, text),
                                 )
                             )
 

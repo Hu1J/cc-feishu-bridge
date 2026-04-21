@@ -97,6 +97,8 @@ async def trigger_skill_review(
     make_claude_query: Callable[..., Awaitable[tuple]],
     project_path: str,
     nudge: SkillNudge,
+    chat_id: str | None = None,
+    send_to_feishu: Callable[[str, str], None] | None = None,
 ) -> None:
     """Trigger a background skill review by calling Claude Code.
 
@@ -105,6 +107,8 @@ async def trigger_skill_review(
             (response_text, session_id, cost)
         project_path: the current project path for Claude context
         nudge: the SkillNudge instance to manage counter and pending state
+        chat_id: Feishu chat_id to deliver results to (optional)
+        send_to_feishu: async callable(chat_id, text) to send a Feishu message (optional)
     """
     if not nudge or not nudge.config.enabled:
         return
@@ -115,6 +119,16 @@ async def trigger_skill_review(
         prompt = f"项目路径：{project_path}\n\n{SKILL_NUDGE_PROMPT}"
         response, _, _ = await make_claude_query(prompt=prompt)
         logger.info(f"[skill_nudge] review done: {response[:200] if response else '(empty)'}")
+
+        # Deliver review result to Feishu if chat_id is available
+        if response and chat_id and send_to_feishu:
+            try:
+                await send_to_feishu(
+                    chat_id,
+                    "🧠 **Skill 自进化评审结果**\n\n" + response.strip(),
+                )
+            except Exception as e:
+                logger.warning(f"[skill_nudge] failed to send to Feishu: {e}")
     except Exception as e:
         logger.warning(f"[skill_nudge] review failed: {e}")
     finally:
