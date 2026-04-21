@@ -178,7 +178,7 @@ async def trigger_skill_review(
                     parts = [c["action"] + " **" + c["name"] + "**" for c in changes]
                     await send_to_feishu(
                         chat_id,
-                        "🧠 Skill 自进化：" + "、".join(parts),
+                        "🧰 Skill 自进化：" + "、".join(parts),
                     )
             except Exception as e:
                 logger.warning(f"[skill_nudge] failed to send to Feishu: {e}")
