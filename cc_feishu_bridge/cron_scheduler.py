@@ -580,9 +580,11 @@ def get_job_logs(job_id: str, data_dir: str) -> dict:
 
 # ─── Job Execution ───────────────────────────────────────────────────────────
 
-async def _run_job(job: dict, config: Config, data_dir: str):
+async def _run_job(job: dict, config: Config, data_dir: str, running_jobs: set[str] | None = None):
     """Execute a single cron job: run Claude, save output, deliver to Feishu."""
     job_id = job["id"]
+    if running_jobs is None:
+        running_jobs = set()
     chat_id = job["chat_id"]
     prompt = job["prompt"]
     job_name = job.get("name", job_id)
@@ -674,6 +676,7 @@ async def _run_job(job: dict, config: Config, data_dir: str):
         total_elapsed = (datetime.now(_CST) - ts_start).total_seconds()
         output_file = _save_job_output(job_id, data_dir, steps, response=None, error=str(e), total_elapsed=total_elapsed)
         mark_run(job_id, success=False, error=str(e), data_dir=data_dir)
+        running_jobs.discard(job_id)
         return
 
     if not response or not response.strip():
@@ -682,6 +685,7 @@ async def _run_job(job: dict, config: Config, data_dir: str):
         total_elapsed = (datetime.now(_CST) - ts_start).total_seconds()
         output_file = _save_job_output(job_id, data_dir, steps, response=None, error=None, total_elapsed=total_elapsed)
         mark_run(job_id, success=True, data_dir=data_dir)
+        running_jobs.discard(job_id)
         return
 
     # ── Save output with execution trace ─────────────────────────────────────
@@ -699,6 +703,7 @@ async def _run_job(job: dict, config: Config, data_dir: str):
         _log("FEISHU_NOTIFY_PENDING", f"notify_at={next_notify}")
         logger.info(f"[cron] Job {job_id} notification pending until {next_notify}")
         mark_run(job_id, success=True, data_dir=data_dir)
+        running_jobs.discard(job_id)
         return
 
     from cc_feishu_bridge.format.reply_formatter import should_use_card, optimize_markdown_style
@@ -717,9 +722,11 @@ async def _run_job(job: dict, config: Config, data_dir: str):
         logger.warning(f"[cron] Job {job_id} delivery failed: {e}")
         _log("FEISHU_DELIVERY_ERROR", str(e))
         mark_run(job_id, success=True, error=f"Delivery failed: {e}", data_dir=data_dir)
+        running_jobs.discard(job_id)
         return
 
     mark_run(job_id, success=True, data_dir=data_dir)
+    running_jobs.discard(job_id)
 
 
 def _save_job_output(job_id: str, data_dir: str, steps: list[str], response: str | None, error: str | None, total_elapsed: float | None = None) -> str:
@@ -776,6 +783,7 @@ class CronScheduler:
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._stop = asyncio.Event()
+        self._running_jobs: set[str] = set()  # prevent overlap: skip jobs already running
 
     def start(self):
         if self._thread is not None:
@@ -875,12 +883,16 @@ class CronScheduler:
                     logger.warning(f"[cron] Pending notification delivery failed: {e}")
 
         due = get_due_jobs(self.data_dir)
+        # Filter out jobs that are already running (prevents overlap if job takes >60s)
+        due = [j for j in due if j["id"] not in self._running_jobs]
         if not due:
             return
 
         logger.info(f"[cron] {len(due)} job(s) due")
+        for job in due:
+            self._running_jobs.add(job["id"])
         tasks = [
-            _run_job(job, self.config, self.data_dir)
+            _run_job(job, self.config, self.data_dir, self._running_jobs)
             for job in due
         ]
         if tasks:
