@@ -140,6 +140,8 @@ class MessageHandler:
         self._skill_nudge = skill_nudge
         # Per-chat pending memory suggestion: chat_id -> suggestion text
         self._pending_memory_suggestions: dict[str, str] = {}
+        # Per-chat pending community skill updates: chat_id -> list of pending skill changes
+        self._pending_skill_updates: dict[str, list] = {}
         self._queue: asyncio.Queue[IncomingMessage] | None = None
         self._queue_loop_id: int | None = None
         # Group chat history: chat_id -> list of recent message contents (max 20)
@@ -256,6 +258,15 @@ class MessageHandler:
 
         asyncio.create_task(do_apply())
 
+    async def _apply_pending_skill_update(self, message: IncomingMessage) -> None:
+        """Apply pending community skill updates after user confirms with "确认更新"."""
+        from cc_feishu_bridge.skill_nudge import apply_pending_skill_updates
+        await apply_pending_skill_updates(
+            chat_id=message.chat_id,
+            pending_store=self._pending_skill_updates,
+            send_to_feishu=lambda cid, text: self._safe_send(cid, message.message_id, text),
+        )
+
     def _get_group_config(self, chat_id: str):
         """Get GroupConfigEntry for a chat_id, auto-registering if first seen."""
         if chat_id in self._feishu_groups:
@@ -367,8 +378,9 @@ class MessageHandler:
                 await self._safe_send(message.chat_id, message.message_id, result.response_text)
             return HandlerResult(success=True)
 
-        # "确认更新" → 执行记忆写入
+        # "确认更新" → 同时处理 Skill 更新（优先）和记忆写入
         if content.strip() == "确认更新":
+            asyncio.create_task(self._apply_pending_skill_update(message))
             asyncio.create_task(self._apply_memory_update(message))
             return HandlerResult(success=True)
 
@@ -1056,6 +1068,8 @@ class MessageHandler:
 
                         # Hermes-style skill nudge: increment tool call count
                         nudge = self._skill_nudge
+                        if nudge:
+                            nudge.config.current_user = message.user_open_id
                         if nudge and nudge.increment():
                             # Fire-and-forget: trigger review in background, do not block stream
                             asyncio.create_task(
@@ -1065,6 +1079,7 @@ class MessageHandler:
                                     nudge=nudge,
                                     chat_id=message.chat_id,
                                     send_to_feishu=lambda cid, text: self._safe_send(cid, message.message_id, text),
+                                    pending_store=self._pending_skill_updates,
                                 )
                             )
 

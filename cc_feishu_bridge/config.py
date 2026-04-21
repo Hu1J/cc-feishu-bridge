@@ -51,6 +51,7 @@ class StorageConfig:
 class SkillNudgeConfig:
     enabled: bool = True
     interval: int = 10
+    current_user: str = ""  # matched against skill author for auto-evolve
 
 
 @dataclass
