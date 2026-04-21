@@ -98,7 +98,7 @@ async def trigger_skill_review(
     project_path: str,
     nudge: SkillNudge,
     chat_id: str | None = None,
-    send_to_feishu: Callable[[str, str], None] | None = None,
+    send_to_feishu: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> None:
     """Trigger a background skill review by calling Claude Code.
 
@@ -115,18 +115,84 @@ async def trigger_skill_review(
 
     logger.info("[skill_nudge] triggering skill review")
 
+    import os
+    from pathlib import Path
+    from datetime import datetime
+
+    skills_dir = Path.home() / ".claude" / "skills"
+    # Record mtimes of existing skills before review so we can detect changes
+    before: dict[str, float] = {}
+    if skills_dir.exists():
+        for f in skills_dir.rglob("SKILL.md"):
+            try:
+                before[str(f)] = f.stat().st_mtime
+            except OSError:
+                pass
+
     try:
         prompt = f"项目路径：{project_path}\n\n{SKILL_NUDGE_PROMPT}"
         response, _, _ = await make_claude_query(prompt=prompt)
         logger.info(f"[skill_nudge] review done: {response[:200] if response else '(empty)'}")
 
-        # Deliver review result to Feishu if chat_id is available
-        if response and chat_id and send_to_feishu:
-            try:
-                await send_to_feishu(
-                    chat_id,
-                    "🧠 **Skill 自进化评审结果**\n\n" + response.strip(),
+        # Detect newly created or updated skills by comparing mtime
+        changes: list[dict] = []
+        if skills_dir.exists():
+            for f in skills_dir.rglob("SKILL.md"):
+                try:
+                    mtime = f.stat().st_mtime
+                except OSError:
+                    continue
+                is_new = str(f) not in before
+                was_updated = (
+                    str(f) in before
+                    and mtime > before[str(f)] + 0.5  # 0.5s grace period
                 )
+                if is_new or was_updated:
+                    try:
+                        content = f.read_text(encoding="utf-8")
+                    except OSError:
+                        continue
+                    name = f.parent.name
+                    description = ""
+                    author = ""
+                    if content.startswith("---"):
+                        parts = content.split("---", 2)
+                        if len(parts) >= 3:
+                            for line in parts[1].splitlines():
+                                if line.startswith("name:"):
+                                    name = line.split("name:", 1)[1].strip()
+                                elif line.startswith("description:"):
+                                    description = line.split("description:", 1)[1].strip()
+                                elif line.startswith("author:"):
+                                    author = line.split("author:", 1)[1].strip()
+                    changes.append({
+                        "name": name,
+                        "path": str(f),
+                        "description": description,
+                        "author": author,
+                        "action": "🆕 新建" if is_new else "🔄 更新",
+                    })
+
+        # Build Feishu notification
+        if chat_id and send_to_feishu:
+            try:
+                if changes:
+                    lines = ["🧠 **Skill 自进化结果**\n"]
+                    for c in changes:
+                        lines.append(f"{c['action']} **{c['name']}**")
+                        if c["description"]:
+                            lines.append(f"   📝 {c['description'][:100]}")
+                    lines.append("")
+                    lines.append("---")
+                    lines.append("_ Skill 文件已写入 ~/.claude/skills/，下次对话自动生效_")
+                    await send_to_feishu(chat_id, "\n".join(lines))
+                elif response:
+                    # No file changes but review ran — show a brief summary
+                    summary = response.strip()[:300]
+                    await send_to_feishu(
+                        chat_id,
+                        f"🧠 **Skill 评审完成**\n\n{summary}\n\n_本次评审未创建或更新任何 Skill_",
+                    )
             except Exception as e:
                 logger.warning(f"[skill_nudge] failed to send to Feishu: {e}")
     except Exception as e:
