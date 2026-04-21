@@ -1088,7 +1088,7 @@ class MessageHandler:
                                 )
                             except Exception:
                                 logger.warning(f"send_interactive_reply failed for memory tool, falling back")
-                                await self._safe_send(message.chat_id, message.message_id, result.card_md, log_reply=False)
+                                await self._safe_send(message.chat_id, message.message_id, card_md, log_reply=False)
                         elif isinstance(result, _AskUserQuestionMarker):
                             # AskUserQuestion → 精美飞书问卷卡片
                             if result.data is not None:

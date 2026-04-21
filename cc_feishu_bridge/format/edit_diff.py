@@ -184,8 +184,9 @@ class _DiffMarker:
             return f"**{self.tool_name}** — `{file_path}`"
 
         diff = colorize_diff(old_str, new_str)
+        diff_text = "\n".join(f"{d.prefix()}{d.content}" for d in diff)
         lines = [f"**{file_path}**\n"]
-        lines.append(f"```diff\n{diff}\n```")
+        lines.append(f"```diff\n{diff_text}\n```")
         return "\n".join(lines)
 
 

@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import jieba
 
@@ -364,7 +364,7 @@ class MemoryManager:
                 lines.append(f"**{p.title}**")
                 lines.append(f"{p.content}")
                 lines.append("")
-            latest = max(p.updated_at for p in prefs if p.updated_at)
+            latest = max((p.updated_at for p in prefs if p.updated_at), default="unknown")
             lines.append(f"\n__PREFS_VERSION:{latest}__")
             parts.append("\n".join(lines))
 
