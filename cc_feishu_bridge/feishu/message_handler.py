@@ -138,8 +138,6 @@ class MessageHandler:
         self.memory_manager = get_memory_manager()
         self.memory_manager.set_system_prompt_stale_callback(self.claude.mark_system_prompt_stale)
         self._skill_nudge = skill_nudge
-        # Per-chat pending community skill updates: chat_id -> list of pending skill changes
-        self._pending_skill_updates: dict[str, list] = {}
         self._queue: asyncio.Queue[IncomingMessage] | None = None
         self._queue_loop_id: int | None = None
         # Group chat history: chat_id -> list of recent message contents (max 20)
@@ -196,15 +194,6 @@ class MessageHandler:
                 logger.info("[_trigger_memory_review] done.")
 
         asyncio.create_task(do_review())
-
-    async def _apply_pending_skill_update(self, message: IncomingMessage) -> None:
-        """Apply pending community skill updates after user confirms with "确认更新"."""
-        from cc_feishu_bridge.skill_nudge import apply_pending_skill_updates
-        await apply_pending_skill_updates(
-            chat_id=message.chat_id,
-            pending_store=self._pending_skill_updates,
-            send_to_feishu=lambda cid, text: self._safe_send(cid, message.message_id, text),
-        )
 
     def _get_group_config(self, chat_id: str):
         """Get GroupConfigEntry for a chat_id, auto-registering if first seen."""
@@ -1019,7 +1008,6 @@ class MessageHandler:
                                     nudge=nudge,
                                     chat_id=message.chat_id,
                                     send_to_feishu=lambda cid, text: self._safe_send(cid, message.message_id, text),
-                                    pending_store=self._pending_skill_updates,
                                     skills_dir=Path(self.data_dir) / "skills",
                                 )
                             )
