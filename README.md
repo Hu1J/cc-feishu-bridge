@@ -73,6 +73,22 @@ cc-feishu-bridge memory proj update <id>|<title>|<content>|<keywords>
 
 - 记忆库位置：`~/.cc-feishu-bridge/memories.db`
 
+## 内置编码原则
+
+cc-feishu-bridge 内置了一套来自 [andrej-karpathy-skills](https://github.com/forrestchang/andrej-karpathy-skills) 的编码原则，开箱即用：
+
+- **编码前思考** — 不要假设，明确呈现权衡，困惑时停下来提问
+- **简洁优先** — 用最少的代码解决问题，不为一次性场景创建抽象
+- **精准修改** — 只碰必须碰的，不在修改时"顺手改进"无关代码
+- **目标驱动执行** — 定义可验证的成功标准，循环验证直到达成
+
+**自动注入**：每次 bridge 启动时，自动检查当前项目是否已有 `CLAUDE.md`：
+- 如不存在 → 在工作目录创建
+- 如已存在且不含此内容 → 插入到文件最前面
+- 如已存在且已包含 → 跳过（防重复插入）
+
+内置编码原则让 Claude Code 在当前项目下始终以统一的工程标准工作，减少低级错误的产生。
+
 ## 核心功能
 
 - **工作目录即 Claude 的工作目录** — 在哪个目录下启动，就在哪个目录下工作；支持多开实例

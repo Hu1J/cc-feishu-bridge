@@ -510,11 +510,48 @@ async def _run_job(job: dict, config: Config, data_dir: str):
     _log("CLAUDE_INTEGRATION_CREATED")
 
     # ── Execute ───────────────────────────────────────────────────────────────
+    staging_dir = None
+    is_skill_scan = job_name == "Skill 优化扫描"
+
+    # For skill scan jobs, generate staging ID and inject into prompt
+    if is_skill_scan:
+        from pathlib import Path
+        import uuid
+        staging_id = uuid.uuid4().hex[:8]
+        skills_dir = Path(data_dir) / "skills"
+        staging_dir = Path(data_dir) / "skills_staging" / staging_id
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        # Replace placeholder in prompt with actual staging path
+        prompt = prompt.replace("{STAGING_ID}", staging_id)
+        prompt = prompt.replace("{STAGING_PATH}", str(staging_dir))
+        prompt = prompt.replace("{SKILLS_DIR}", str(skills_dir))
+
     try:
         _log("CLAUDE_QUERY_START")
         response, session_id, cost = await claude.query(prompt=prompt)
         elapsed = (datetime.now(_CST) - ts_start).total_seconds()
         _log("CLAUDE_QUERY_DONE", f"elapsed={elapsed:.1f}s, session_id={session_id!r}, cost=${cost:.4f}")
+
+        # For skill scan jobs, process staging directory
+        if is_skill_scan and staging_dir:
+            from cc_feishu_bridge.skill_nudge import _process_skill_staging
+            import shutil
+            from cc_feishu_bridge.format.reply_formatter import should_use_card
+
+            async def _skill_send(cid, text):
+                if should_use_card(text):
+                    await feishu.send_interactive_card(cid, text)
+                else:
+                    await feishu.send_post(cid, text)
+
+            await _process_skill_staging(
+                staging_dir=staging_dir,
+                skills_dir=skills_dir,
+                chat_id=chat_id,
+                send_to_feishu=_skill_send,
+            )
+            if staging_dir.exists():
+                shutil.rmtree(staging_dir)
     except Exception as e:
         logger.warning(f"[cron] Job {job_id} Claude error: {e}")
         _log("CLAUDE_QUERY_ERROR", str(e))

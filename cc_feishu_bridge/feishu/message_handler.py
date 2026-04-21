@@ -17,7 +17,7 @@ from cc_feishu_bridge.claude.memory_manager import get_memory_manager, MEMORY_SY
 from cc_feishu_bridge.claude.feishu_file_tools import FEISHU_FILE_GUIDE
 from cc_feishu_bridge.claude.cron_tools import CRON_SYSTEM_GUIDE
 from cc_feishu_bridge.claude.session_manager import SessionManager
-from cc_feishu_bridge.skill_nudge import SkillNudge, trigger_skill_review
+from cc_feishu_bridge.skill_nudge import SkillNudge, SkillSymlinkHook, trigger_skill_review
 from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
 from cc_feishu_bridge.format.edit_diff import _DiffMarker, _MemoryCardMarker
 from cc_feishu_bridge.format.questionnaire_card import _AskUserQuestionMarker, format_questionnaire_card
@@ -140,6 +140,11 @@ class MessageHandler:
         self._skill_nudge = skill_nudge
         # Per-chat pending community skill updates: chat_id -> list of pending skill changes
         self._pending_skill_updates: dict[str, list] = {}
+        # Auto-symlink hook: watches ~/.cc-feishu-bridge/skills/ and links to ~/.claude/skills/
+        self._skill_symlink_hook = SkillSymlinkHook(
+            skills_dir=Path(self.data_dir) / "skills",
+            symlink_dir=Path.home() / ".claude" / "skills",
+        )
         self._queue: asyncio.Queue[IncomingMessage] | None = None
         self._queue_loop_id: int | None = None
         # Group chat history: chat_id -> list of recent message contents (max 20)
@@ -171,6 +176,7 @@ class MessageHandler:
         Asks Claude to consider updating memory via MCP tools if it wants.
         The bridge monitors DB before/after and notifies only if memory actually changed.
         """
+        logger.info("[_trigger_memory_review] starting background review")
         project_path = getattr(self, "_current_project_path", "")
         mm = self.memory_manager
         user_open_id = message.user_open_id
@@ -192,16 +198,13 @@ class MessageHandler:
                 pass
 
         prompt = (
-            f"项目路径：{project_path}\n\n"
-            f"对话刚结束，用户说：{message.content[:200]}\n\n"
-            f"Claude 的回复摘要：{response_text[:300] if response_text else '(无文本回复)'}\n\n"
-            "如果这段对话中有值得记住的信息，请调用 MCP 工具写入记忆：\n"
-            "- 项目记忆：mcp__memory__MemoryAddProj (title/content/keywords)\n"
-            "- 用户偏好：mcp__memory__MemoryAddUser (title/content/keywords)\n"
-            "如果没有值得记住的，什么都不需要做。\n"
+            "根据之前的对话，判断是否有值得记住的信息。需要时直接调用 MCP 工具（新增/更新/删除）来管理记忆，不需要问我任何问题。\n"
         )
 
         async def do_review():
+            # Defensive: ensure claude is initialized before querying
+            if self.claude._options is None:
+                self.claude._init_options()
             try:
                 await self.claude.query(prompt=prompt)
                 # CC may or may not have called MCP tools — we just monitor DB
@@ -257,6 +260,8 @@ class MessageHandler:
 
             except Exception as e:
                 logger.warning(f"[_trigger_memory_review] failed: {e}")
+            finally:
+                logger.info("[_trigger_memory_review] done.")
 
         asyncio.create_task(do_review())
 
@@ -411,6 +416,7 @@ class MessageHandler:
 
     async def _worker_loop(self) -> None:
         """串行出队并处理消息。"""
+        self._skill_symlink_hook.start()
         try:
             while True:
                 try:
@@ -434,6 +440,7 @@ class MessageHandler:
                 except Exception:
                     logger.exception("Worker loop error")
         finally:
+            self._skill_symlink_hook.stop()
             self._is_processing = False
 
     async def _process_message(self, message: IncomingMessage) -> None:
@@ -958,6 +965,7 @@ class MessageHandler:
     ) -> None:
         """Run Claude query in background, send results to Feishu on completion."""
         reaction_id = None
+        _last_response = ""
 
         async def _show_typing() -> None:
             """在 _query_lock 拿到后显示 typing（通过 on_start 回调传入 query）。"""
@@ -1072,6 +1080,7 @@ class MessageHandler:
                         if nudge:
                             nudge.config.current_user = message.user_open_id
                         if nudge and nudge.increment():
+                            logger.info("[_trigger_skill_review] starting background review")
                             # Fire-and-forget: trigger review in background, do not block stream
                             asyncio.create_task(
                                 trigger_skill_review(
@@ -1080,6 +1089,8 @@ class MessageHandler:
                                     chat_id=message.chat_id,
                                     send_to_feishu=lambda cid, text: self._safe_send(cid, message.message_id, text),
                                     pending_store=self._pending_skill_updates,
+                                    skills_dir=Path(self.data_dir) / "skills",
+                                    staging_dir_base=Path(self.data_dir) / "skills_staging",
                                 )
                             )
 
@@ -1196,8 +1207,7 @@ class MessageHandler:
 
                 # 如果这次尝试有实质内容（发了任何消息或返回了文本），认为成功，退出重试循环
                 if accumulator.sent_something or response:
-                    # Trigger memory review after conversation ends (fire-and-forget)
-                    self._trigger_memory_review(message, response or "")
+                    _last_response = response or ""
                     break
 
                 # 这次尝试是空结果（cost > 0 但没有任何内容），重试
@@ -1258,6 +1268,8 @@ class MessageHandler:
             if reaction_id:
                 logger.info(f"[typing] off — user={message.user_open_id}, reaction_id={reaction_id!r}")
                 await self.feishu.remove_typing_reaction(message.message_id, reaction_id)
+            # Trigger memory review after [typing] off
+            self._trigger_memory_review(message, _last_response)
 
     async def _handle_stop(self, message: IncomingMessage) -> HandlerResult:
         """Handle /stop — cancel the current worker task and interrupt Claude."""
