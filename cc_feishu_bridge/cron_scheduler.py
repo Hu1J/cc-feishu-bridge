@@ -636,15 +636,24 @@ async def _run_job(job: dict, config: Config, data_dir: str, running_jobs: set[s
     is_verbose = job.get("verbose", False)
 
     async def _on_stream(claude_msg):
-        if claude_msg.tool_name:
-            if is_verbose:
-                from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
-                formatter = ReplyFormatter()
-                result = formatter.format_tool_call(claude_msg.tool_name, claude_msg.tool_input)
-                await feishu.send_post(chat_id, result)
-            _stream_log(claude_msg)
-        elif claude_msg.content:
-            _stream_log(claude_msg)
+        try:
+            if claude_msg.tool_name:
+                if is_verbose:
+                    from cc_feishu_bridge.format.reply_formatter import ReplyFormatter
+                    from cc_feishu_bridge.format.edit_diff import _DiffMarker, _MemoryCardMarker
+                    formatter = ReplyFormatter()
+                    result = formatter.format_tool_call(claude_msg.tool_name, claude_msg.tool_input)
+                    if isinstance(result, (_DiffMarker, list)):
+                        pass  # Skip diff markers — no Feishu card support in cron
+                    elif isinstance(result, _MemoryCardMarker):
+                        await feishu.send_post(chat_id, result.render())
+                    else:
+                        await feishu.send_post(chat_id, str(result))
+                await _stream_log(claude_msg)
+            elif claude_msg.content:
+                await _stream_log(claude_msg)
+        except Exception as e:
+            logger.warning(f"[_on_stream] error: {e}")
 
     try:
         _log("CLAUDE_QUERY_START")
