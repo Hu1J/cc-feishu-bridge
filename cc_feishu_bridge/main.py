@@ -127,12 +127,13 @@ def _register_skill_optimization_job(data_dir: str, scheduler) -> None:
 
     prompt = """【Skill 优化扫描】
 
-请扫描 {SKILLS_DIR}/ 目录下所有 Skill（如果需要更新，先拷贝到 {STAGING_PATH}/ 下修改），分析哪些值得更新或新建。
+请扫描 {SKILLS_DIR}/ 目录下所有 Skill，分析哪些值得更新或新建。
 
 **操作步骤：**
-1. 先查看 {SKILLS_DIR}/ 目录下已有的 Skill（如果需要更新，先拷贝到 {STAGING_PATH}/）
-2. 把完整内容写入 {STAGING_PATH}/<skill-name>/SKILL.md
+1. 先查看 {SKILLS_DIR}/ 目录下已有的 Skill
+2. 把完整内容直接写入 {SKILLS_DIR}/<skill-name>/SKILL.md
 3. 格式：YAML frontmatter (name/description/author/version) + Markdown body
+4. {SKILLS_DIR}/ 本身是一个 Git 仓库。写入 SKILL.md 后，在 {SKILLS_DIR}/ 目录下执行 `git add <skill-name>/ && git commit -m "<中文 commit message>"`，commit message 必须用中文，清晰说明本次改动内容
 
 请给出优化建议列表。"""
 

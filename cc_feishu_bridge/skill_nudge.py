@@ -10,7 +10,6 @@ import asyncio
 import logging
 import shutil
 import threading
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Awaitable
@@ -159,7 +158,7 @@ class _SymlinkHandler:
 
 
 # Review prompt shown to Claude Code when nudge fires
-# Claude writes proposed skills to a staging dir; we then scan and apply
+# Claude writes skills directly to {SKILLS_DIR}/ and manages git commits there
 SKILL_NUDGE_PROMPT = """\
 根据当前对话历史，判断是否有值得创建或更新的 Skill。
 
@@ -170,9 +169,10 @@ SKILL_NUDGE_PROMPT = """\
 - 用户要求记住某个流程
 
 操作步骤：
-1. 先查看 {SKILLS_DIR}/ 目录下已有的 Skill（如果需要更新，先拷贝到临时目录）
-2. 把完整内容写入临时目录：{STAGING_PATH}/<skill-name>/SKILL.md
+1. 先查看 {SKILLS_DIR}/ 目录下已有的 Skill
+2. 把完整内容直接写入 {SKILLS_DIR}/<skill-name>/SKILL.md
 3. 格式：YAML frontmatter (name/description/author/version) + Markdown body
+4. {SKILLS_DIR}/ 本身是一个 Git 仓库。写入 SKILL.md 后，在 {SKILLS_DIR}/ 目录下执行 `git add <skill-name>/ && git commit -m "<中文 commit message>"`，commit message 必须用中文，清晰说明本次改动内容
 
 注意：
 - 只创建真正有价值的 Skill，不要为了"有"而创建
@@ -197,63 +197,75 @@ def _parse_skill_meta(content: str) -> tuple[str, str, str]:
     return name, description, author
 
 
-async def _process_skill_staging(
-    staging_dir: Path,
+def _get_skill_git_state(skills_dir: Path) -> dict[str, str | None]:
+    """Get current git state: {skill_name: latest_commit_sha or None}."""
+    state: dict[str, str | None] = {}
+    if not skills_dir.exists():
+        return state
+    import subprocess
+    for skill_path in skills_dir.iterdir():
+        if not skill_path.is_dir():
+            continue
+        skill_md = skill_path / "SKILL.md"
+        if not skill_md.exists():
+            continue
+        try:
+            result = subprocess.run(
+                ["git", "log", "-1", "--format=%H", "--", skill_path.name],
+                cwd=str(skills_dir),
+                capture_output=True, text=True,
+            )
+            sha = result.stdout.strip() or None
+            state[skill_path.name] = sha
+        except Exception:
+            state[skill_path.name] = None
+    return state
+
+
+def _get_skill_commit_message(skills_dir: Path, skill_name: str, sha: str) -> str:
+    """Get the commit message for a given SHA."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%s", sha],
+            cwd=str(skills_dir),
+            capture_output=True, text=True,
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
+async def _detect_skill_changes(
+    before_state: dict[str, str | None],
     skills_dir: Path,
     chat_id: str | None = None,
     send_to_feishu: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> None:
-    """Scan staging dir for proposed skills, apply auto-changes, notify user."""
-    auto_changes: list[dict] = []
-    pending_changes: list[dict] = []
+    """Compare before/after git state, detect changes, notify user."""
+    after_state = _get_skill_git_state(skills_dir)
 
-    if not staging_dir.exists():
+    changed = []
+    for skill_name, sha in after_state.items():
+        before_sha = before_state.get(skill_name)
+        if before_sha is None and sha is not None:
+            # New skill
+            msg = _get_skill_commit_message(skills_dir, skill_name, sha)
+            changed.append({"name": skill_name, "action": "🆕 新建", "commit": msg})
+        elif sha != before_sha and sha is not None:
+            # Updated skill
+            msg = _get_skill_commit_message(skills_dir, skill_name, sha)
+            changed.append({"name": skill_name, "action": "🔄 更新", "commit": msg})
+
+    if not changed:
         return
 
-    for f in staging_dir.rglob("SKILL.md"):
-        try:
-            new_content = f.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        skill_name, description, author = _parse_skill_meta(new_content)
-        skill_key = skills_dir / f.parent.name / "SKILL.md"
-        is_new = not skill_key.exists()
-        is_updated = False
-        if not is_new and skill_key.exists():
-            try:
-                current_content = skill_key.read_text(encoding="utf-8")
-                is_updated = current_content != new_content
-            except OSError:
-                pass
-        if not is_new and not is_updated:
-            continue
+    # Build notification with commit messages
+    parts = []
+    for c in changed:
+        commit_info = f"（{c['commit']}）" if c['commit'] else ""
+        parts.append(f"{c['action']} **{c['name']}**{commit_info}")
 
-        change = {
-            "name": skill_name or f.parent.name,
-            "path": str(skill_key),
-            "description": description,
-            "author": author,
-            "proposed_path": str(f),
-            "action": "🆕 新建" if is_new else "🔄 更新",
-        }
-        # skills_dir 是实例私有的，全部都是我们自己的 skill，全部自动应用
-        auto_changes.append(change)
-
-    # Apply auto-change immediately
-    for c in auto_changes:
-        try:
-            dest = Path(c["path"])
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(c["proposed_path"], dest)
-            logger.info(f"[skill_nudge] auto-evolved: {c['name']}")
-        except OSError as e:
-            logger.warning(f"[skill_nudge] failed to apply {c['name']}: {e}")
-
-    # Build notification
-    if not auto_changes:
-        return
-
-    parts = [c["action"] + " **" + c["name"] + "**" for c in auto_changes]
     msg = "🧰 Skill 自进化：" + "、".join(parts)
 
     if chat_id and send_to_feishu:
@@ -270,7 +282,6 @@ async def trigger_skill_review(
     send_to_feishu: Callable[[str, str], Awaitable[None]] | None = None,
     pending_store: dict | None = None,
     skills_dir: Path | None = None,
-    staging_dir_base: Path | None = None,
 ) -> None:
     """Trigger a background skill review by calling Claude Code.
 
@@ -282,7 +293,6 @@ async def trigger_skill_review(
         send_to_feishu: async callable(chat_id, text) to send a Feishu message (optional)
         pending_store: dict[chat_id, list[dict]] to store pending community skill updates
         skills_dir: path to skills directory (defaults to ~/.cc-feishu-bridge/skills/)
-        staging_dir_base: base for staging dirs (defaults to ~/.cc-feishu-bridge/skills_staging/)
     """
     if not nudge or not nudge.config.enabled:
         return
@@ -290,22 +300,20 @@ async def trigger_skill_review(
     logger.info("[skill_nudge] triggering skill review")
 
     skills_dir = skills_dir or (Path.home() / ".cc-feishu-bridge" / "skills")
-    staging_dir_base = staging_dir_base or (Path.home() / ".cc-feishu-bridge" / "skills_staging")
-    staging_id = uuid.uuid4().hex[:8]
-    staging_dir = staging_dir_base / staging_id
-    staging_dir.mkdir(parents=True, exist_ok=True)
+
+    # Snapshot before state
+    before_state = _get_skill_git_state(skills_dir)
 
     try:
         prompt = SKILL_NUDGE_PROMPT.format(
             SKILLS_DIR=str(skills_dir),
-            STAGING_PATH=str(staging_dir),
         )
         response, _, _ = await make_claude_query(prompt)
-        logger.info(f"[_trigger_skill_review] done: {response[:200] if response else '(empty)'}")
+        logger.info(f"[trigger_skill_review] done: {response[:200] if response else '(empty)'}")
 
-        # Process staging results (scan, apply, notify)
-        await _process_skill_staging(
-            staging_dir=staging_dir,
+        # Detect changes via git state comparison and notify
+        await _detect_skill_changes(
+            before_state=before_state,
             skills_dir=skills_dir,
             chat_id=chat_id,
             send_to_feishu=send_to_feishu,
@@ -314,8 +322,6 @@ async def trigger_skill_review(
     except Exception as e:
         logger.warning(f"[skill_nudge] review failed: {e}")
     finally:
-        if staging_dir.exists():
-            shutil.rmtree(staging_dir)
         if nudge:
             nudge.mark_review_done()
 

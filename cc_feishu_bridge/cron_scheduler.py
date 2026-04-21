@@ -513,20 +513,14 @@ async def _run_job(job: dict, config: Config, data_dir: str):
     _log("CLAUDE_INTEGRATION_CREATED")
 
     # ── Execute ───────────────────────────────────────────────────────────────
-    staging_dir = None
+    skills_dir = Path(data_dir) / "skills"
     is_skill_scan = job_name == "Skill 优化扫描"
 
-    # For skill scan jobs, generate staging ID and inject into prompt
+    # Snapshot before state for skill scan jobs
+    before_state = None
     if is_skill_scan:
-        from pathlib import Path
-        import uuid
-        staging_id = uuid.uuid4().hex[:8]
-        skills_dir = Path(data_dir) / "skills"
-        staging_dir = Path(data_dir) / "skills_staging" / staging_id
-        staging_dir.mkdir(parents=True, exist_ok=True)
-        # Replace placeholder in prompt with actual staging path
-        prompt = prompt.replace("{STAGING_ID}", staging_id)
-        prompt = prompt.replace("{STAGING_PATH}", str(staging_dir))
+        from cc_feishu_bridge.skill_nudge import _get_skill_git_state
+        before_state = _get_skill_git_state(skills_dir)
         prompt = prompt.replace("{SKILLS_DIR}", str(skills_dir))
 
     async def _stream_log(claude_msg):
@@ -555,10 +549,9 @@ async def _run_job(job: dict, config: Config, data_dir: str):
         elapsed = (datetime.now(_CST) - ts_start).total_seconds()
         _log("CLAUDE_QUERY_DONE", f"elapsed={elapsed:.1f}s, session_id={session_id!r}, cost=${cost:.4f}")
 
-        # For skill scan jobs, process staging directory
-        if is_skill_scan and staging_dir:
-            from cc_feishu_bridge.skill_nudge import _process_skill_staging
-            import shutil
+        # For skill scan jobs, detect changes via git state comparison
+        if is_skill_scan and before_state is not None:
+            from cc_feishu_bridge.skill_nudge import _detect_skill_changes
             from cc_feishu_bridge.format.reply_formatter import should_use_card
 
             async def _skill_send(cid, text):
@@ -567,14 +560,12 @@ async def _run_job(job: dict, config: Config, data_dir: str):
                 else:
                     await feishu.send_post(cid, text)
 
-            await _process_skill_staging(
-                staging_dir=staging_dir,
+            await _detect_skill_changes(
+                before_state=before_state,
                 skills_dir=skills_dir,
                 chat_id=chat_id,
                 send_to_feishu=_skill_send,
             )
-            if staging_dir.exists():
-                shutil.rmtree(staging_dir)
     except Exception as e:
         logger.warning(f"[cron] Job {job_id} Claude error: {e}")
         _log("CLAUDE_QUERY_ERROR", str(e))
