@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-04-22
+
+### Fixed
+
+- **cron notify_at 正确收集中间消息**：当 notify_at 设置时，禁用实时流式推送，所有输出（中间消息 + 最终响应）统一在 notify_at 时间发送。修复中间消息丢失的问题。
+- **pending_store.remove bug**：修复 remove() 使用 job_id 而非 pending_key 导致永远删不掉 entry 的问题。
+
 ## [0.6.3] - 2026-04-21
 
 ### Fixed
