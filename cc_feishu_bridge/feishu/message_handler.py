@@ -925,7 +925,7 @@ class MessageHandler:
                     if media_prompt_prefix:
                         logger.info(f"Inbound media saved: {media_prompt_prefix}")
                         # Notify user in Feishu that media was received
-                        icon = {"image": "🖼️", "file": "📎"}.get(message.message_type, "📎")
+                        icon = {"image": "🖼️", "file": "🗃"}.get(message.message_type, "🗃")
                         media_notify_text = f"{icon} 收到 {message.message_type}，正在分析..."
                         await self._safe_send(message.chat_id, message.message_id, media_notify_text)
                 except Exception as e:

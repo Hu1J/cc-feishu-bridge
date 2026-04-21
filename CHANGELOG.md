@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-04-21
+
+### Fixed
+
+- **get_message 支持图片消息**：`get_message()` 优先尝试 `.message`，失败后回退到 `.items[0]`，解决图片消息下载返回空的问题。
+- **文件图标**：飞书文件消息通知图标从 📎 改为 🗃。
+
 ## [0.6.1] - 2026-04-21
 
 ### Fixed
