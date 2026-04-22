@@ -150,10 +150,10 @@ class GitHubSource(SkillSource):
         tags = []
 
         content = content.strip()
-        # Handle YAML frontmatter
         if content.startswith("---"):
             try:
                 import yaml
+
                 end = content.index("---", 3)
                 frontmatter = yaml.safe_load(content[3:end])
                 if frontmatter:
@@ -161,12 +161,10 @@ class GitHubSource(SkillSource):
                     raw_tags = frontmatter.get("tags", [])
                     if isinstance(raw_tags, list):
                         tags = [str(t) for t in raw_tags]
-                # Remove frontmatter for inline parsing
-                content = content[content.index("---", 3) + 3 :]
+                content = content[end + 3 :]
             except Exception:
                 pass
 
-        # Parse inline description:/tags: (Hermes format)
         for line in content.split("\n"):
             line = line.strip()
             if line.startswith("description:") and not description:
@@ -245,17 +243,20 @@ class HermesIndexSource(SkillSource):
     def __init__(self, timeout: float = 10.0, follow_redirects: bool = True):
         self._client = httpx.AsyncClient(timeout=timeout, follow_redirects=follow_redirects)
         self._cache: Optional[dict] = None
+        self._lock = asyncio.Lock()
 
     async def _get_index(self) -> dict:
-        """Get cached index."""
+        """Get cached index (thread-safe)."""
         if self._cache is None:
-            try:
-                resp = await self._client.get(self.INDEX_URL)
-                resp.raise_for_status()
-                self._cache = resp.json()
-            except Exception as e:
-                logger.warning(f"[HermesIndexSource] failed to fetch index: {e}")
-                self._cache = {"skills": []}
+            async with self._lock:
+                if self._cache is None:  # double-check after acquiring lock
+                    try:
+                        resp = await self._client.get(self.INDEX_URL)
+                        resp.raise_for_status()
+                        self._cache = resp.json()
+                    except Exception as e:
+                        logger.warning(f"[HermesIndexSource] failed to fetch index: {e}")
+                        self._cache = {"skills": []}
         return self._cache
 
     async def search(self, query: str, limit: int = 5) -> list[SkillMeta]:
@@ -421,18 +422,21 @@ class LobeHubSource(SkillSource):
     def __init__(self, timeout: float = 10.0, follow_redirects: bool = True):
         self._client = httpx.AsyncClient(timeout=timeout, follow_redirects=follow_redirects)
         self._cache: Optional[list] = None
+        self._lock = asyncio.Lock()
 
     async def _get_index(self) -> list:
-        """Get agents index."""
+        """Get agents index (thread-safe)."""
         if self._cache is None:
-            try:
-                resp = await self._client.get(self.INDEX_URL)
-                resp.raise_for_status()
-                data = resp.json()
-                self._cache = data.get("agents", [])
-            except Exception as e:
-                logger.warning(f"[LobeHubSource] failed to fetch index: {e}")
-                self._cache = []
+            async with self._lock:
+                if self._cache is None:  # double-check after acquiring lock
+                    try:
+                        resp = await self._client.get(self.INDEX_URL)
+                        resp.raise_for_status()
+                        data = resp.json()
+                        self._cache = data.get("agents", [])
+                    except Exception as e:
+                        logger.warning(f"[LobeHubSource] failed to fetch index: {e}")
+                        self._cache = []
         return self._cache
 
     async def search(self, query: str, limit: int = 5) -> list[SkillMeta]:
