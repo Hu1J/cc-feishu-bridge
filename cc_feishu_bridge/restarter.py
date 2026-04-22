@@ -329,15 +329,34 @@ def check_version() -> tuple[str, str]:
         raise RestartError(f"检查版本失败: {e}")
 
 
+def check_supercc() -> tuple[bool, str]:
+    """Check if supercc package exists on PyPI.
+
+    Returns (exists, latest_version). version is "unknown" if we can't determine.
+    """
+    import httpx
+    try:
+        response = httpx.get(
+            "https://pypi.org/pypi/supercc/json",
+            timeout=15,
+        )
+        if response.status_code == 200:
+            latest_ver = response.json()["info"]["version"]
+            return (True, latest_ver)
+        return (False, "unknown")
+    except Exception:
+        return (False, "unknown")
+
+
 # Step labels for update CLI display
 _UPDATE_CLI_STEP_LABELS = [
-    "检查更新", "下载新版本", "下载完成",
+    "检查更新", "检查新版本", "下载完成",
     "准备重启", "清理文件锁", "启动新实例", "检查新实例", "重启完成",
 ]
 
 # Step labels for update Feishu messages
 _UPDATE_FEISHU_STEP_LABELS = [
-    "📋 检查更新", "⬇️ 下载新版本", "✅ 下载完成",
+    "📋 检查更新", "📦 检查新版本", "✅ 下载完成",
     "🛑 准备重启", "🧹 清理文件锁", "🚀 启动新实例", "🔍 检查新实例", "✅ 重启完成",
 ]
 
@@ -348,7 +367,7 @@ class UpdateStep:
     step: int          # 1–8
     total: int         # always 8
     label: str         # short label shown to user
-    status: str        # "done" | "final" | "skip"
+    status: str        # "done" | "final" | "skip" | "migrate"
     detail: str = ""   # extra info
     success: bool = False
     new_pid: Optional[int] = None
@@ -370,13 +389,24 @@ def _do_update(file_lock=None):
         detail=f"{current_ver} → {latest_ver}",
     )
     if packaging.version.parse(latest_ver) <= packaging.version.parse(current_ver):
-        yield UpdateStep(
-            step=2, total=8,
-            label=_UPDATE_CLI_STEP_LABELS[1],
-            status="skip",
-            detail=current_ver,
-            success=True,
-        )
+        # cc-feishu-bridge 已是最新，检查是否需要迁移到 supercc
+        supercc_exists, supercc_ver = check_supercc()
+        if supercc_exists:
+            yield UpdateStep(
+                step=2, total=8,
+                label=_UPDATE_CLI_STEP_LABELS[1],
+                status="migrate",
+                detail=f"cc-feishu-bridge {current_ver} → supercc {supercc_ver}",
+                success=True,
+            )
+        else:
+            yield UpdateStep(
+                step=2, total=8,
+                label=_UPDATE_CLI_STEP_LABELS[1],
+                status="skip",
+                detail=current_ver,
+                success=True,
+            )
         return
 
     # Step 2: 下载新版本
@@ -429,6 +459,22 @@ async def run_update(file_lock, feishu: "FeishuClient",
                 f"## ✅ 已是最新版本\n\n"
                 f"**当前版本**: `{step_obj.detail}`\n\n"
                 f"无需更新，继续使用吧 🎉"
+            )
+            await feishu.send_interactive_reply(chat_id, card, reply_to_message_id)
+            return False
+
+        if step_obj.status == "migrate":
+            card = (
+                f"## 🪦 cc-feishu-bridge 已停止维护\n\n"
+                f"**当前版本**: `cc-feishu-bridge {step_obj.detail.split(' → ')[0]}`\n\n"
+                f"cc-feishu-bridge 已迁移到新项目 **SuperCC**（PyPI: `supercc`），\n"
+                f"本版本为最终版，不再更新。\n\n"
+                f"**迁移方式**（当前目录不变）：\n"
+                f"```bash\n"
+                f"pip install -U supercc\n"
+                f"```\n\n"
+                f"迁移后启动命令：`supercc start`\n\n"
+                f"详细说明见：https://github.com/Hu1J/supercc"
             )
             await feishu.send_interactive_reply(chat_id, card, reply_to_message_id)
             return False
@@ -494,15 +540,35 @@ def run_update_cli(file_lock, feishu=None, chat_id: str | None = None):
             # Already latest — send initial card then "already latest" card
             initial = f"## 🔄 正在更新\n\n⏳ 检查更新，请稍候..."
             await _send(initial)
-            # Find step 1 detail for version display
             step1_detail = next(
                 (s.detail for s in steps if s.step == 1 and s.detail),
                 steps[-1].detail
             )
             card = (
                 f"## ✅ 已是最新版本\n\n"
-                f"**当前版本**: `{steps[-1].detail}`\n\n"
+                f"**当前版本**: `{step1_detail}`\n\n"
                 f"无需更新，继续使用吧 🎉"
+            )
+            await _send(card)
+            return
+
+        if steps and steps[-1].status == "migrate":
+            # Final version — migration to supercc
+            initial = f"## 🔄 正在更新\n\n⏳ 检查更新，请稍候..."
+            await _send(initial)
+            current_ver_str = steps[-1].detail.split(" → ")[0].replace("cc-feishu-bridge ", "")
+            supercc_ver = steps[-1].detail.split(" → ")[1].replace("supercc ", "") if " → " in steps[-1].detail else "unknown"
+            card = (
+                f"## 🪦 cc-feishu-bridge 已停止维护\n\n"
+                f"**当前版本**: `cc-feishu-bridge {current_ver_str}`\n\n"
+                f"cc-feishu-bridge 已迁移到新项目 **SuperCC**（PyPI: `supercc`，版本 `{supercc_ver}`），\n"
+                f"本版本为最终版，不再更新。\n\n"
+                f"**迁移方式**（当前目录不变）：\n"
+                f"```bash\n"
+                f"pip install -U supercc\n"
+                f"```\n\n"
+                f"迁移后启动命令：`supercc start`\n\n"
+                f"详细说明见：https://github.com/Hu1J/supercc"
             )
             await _send(card)
             return
