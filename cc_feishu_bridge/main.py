@@ -797,7 +797,6 @@ def main(args=None):
 
     restart_parser = subparsers.add_parser("restart", help="Restart current bridge instance")
     update_parser = subparsers.add_parser("update", help="Check for updates and restart if needed")
-    migrate_parser = subparsers.add_parser("migrate", help="Migrate cc-feishu-bridge data to SuperCC")
 
     # send
     send_parser = subparsers.add_parser("send", help="Send a file or image to the active Feishu chat")
@@ -919,22 +918,6 @@ def main(args=None):
             _os._exit(0)
         except UpdateErr as e:
             print(f"\n❌ 更新失败: {e}")
-            sys.exit(1)
-        return
-
-    if command == "migrate":
-        from cc_feishu_bridge.migration import run_migration, MigrationError as MigErr
-        try:
-            project_path = os.getcwd()
-            result = run_migration(project_path)
-            print("✅ 迁移完成：")
-            for section, actions in result.items():
-                print(f"\n  [{section}]")
-                for a in actions:
-                    print(f"    - {a}")
-            print()
-        except MigErr as e:
-            print(f"\n❌ 迁移失败: {e}")
             sys.exit(1)
         return
 

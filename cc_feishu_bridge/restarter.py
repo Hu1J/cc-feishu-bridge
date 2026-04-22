@@ -464,16 +464,23 @@ async def run_update(file_lock, feishu: "FeishuClient",
             return False
 
         if step_obj.status == "migrate":
+            # Run migration before showing the card
+            from cc_feishu_bridge.migration import run_migration, MigrationError
+            try:
+                run_migration(current_path)
+            except MigrationError as e:
+                logger.warning(f"Migration failed: {e}")
+
             card = (
                 f"## 🪦 cc-feishu-bridge 已停止维护\n\n"
                 f"**当前版本**: `cc-feishu-bridge {step_obj.detail.split(' → ')[0]}`\n\n"
-                f"cc-feishu-bridge 已迁移到新项目 **SuperCC**（PyPI: `supercc`），\n"
+                f"数据已迁移到 `~/.supercc/`，cc-feishu-bridge 已迁移到新项目 **SuperCC**（PyPI: `supercc`），\n"
                 f"本版本为最终版，不再更新。\n\n"
-                f"**迁移方式**（当前目录不变）：\n"
+                f"**下一步**：\n"
                 f"```bash\n"
                 f"pip install -U supercc\n"
+                f"supercc start\n"
                 f"```\n\n"
-                f"迁移后启动命令：`supercc start`\n\n"
                 f"详细说明见：https://github.com/Hu1J/supercc"
             )
             await feishu.send_interactive_reply(chat_id, card, reply_to_message_id)
@@ -553,21 +560,27 @@ def run_update_cli(file_lock, feishu=None, chat_id: str | None = None):
             return
 
         if steps and steps[-1].status == "migrate":
-            # Final version — migration to supercc
+            # Run migration before showing the card
+            from cc_feishu_bridge.migration import run_migration, MigrationError
+
             initial = f"## 🔄 正在更新\n\n⏳ 检查更新，请稍候..."
             await _send(initial)
+            try:
+                run_migration(os.getcwd())
+            except MigrationError as e:
+                logger.warning(f"Migration failed: {e}")
             current_ver_str = steps[-1].detail.split(" → ")[0].replace("cc-feishu-bridge ", "")
             supercc_ver = steps[-1].detail.split(" → ")[1].replace("supercc ", "") if " → " in steps[-1].detail else "unknown"
             card = (
                 f"## 🪦 cc-feishu-bridge 已停止维护\n\n"
                 f"**当前版本**: `cc-feishu-bridge {current_ver_str}`\n\n"
-                f"cc-feishu-bridge 已迁移到新项目 **SuperCC**（PyPI: `supercc`，版本 `{supercc_ver}`），\n"
+                f"数据已迁移到 `~/.supercc/`，cc-feishu-bridge 已迁移到新项目 **SuperCC**（PyPI: `supercc`，版本 `{supercc_ver}`），\n"
                 f"本版本为最终版，不再更新。\n\n"
-                f"**迁移方式**（当前目录不变）：\n"
+                f"**下一步**：\n"
                 f"```bash\n"
                 f"pip install -U supercc\n"
+                f"supercc start\n"
                 f"```\n\n"
-                f"迁移后启动命令：`supercc start`\n\n"
                 f"详细说明见：https://github.com/Hu1J/supercc"
             )
             await _send(card)
