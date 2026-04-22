@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
 
 from cc_feishu_bridge.skill_search.models import SkillMeta
 from cc_feishu_bridge.skill_search.sources import (
@@ -72,23 +71,6 @@ class SkillSearchRegistry:
         results = await asyncio.gather(*tasks)
         flat = [item for sublist in results for item in sublist]
         return self._dedup_and_sort(flat)
-
-    async def get_by_name_all(self, name: str) -> list[SkillMeta]:
-        """Search by name across all sources in parallel."""
-
-        async def get_one(source: SkillSource) -> Optional[SkillMeta]:
-            try:
-                return await asyncio.wait_for(
-                    source.get_by_name(name),
-                    timeout=self.timeout,
-                )
-            except Exception:
-                return None
-
-        tasks = [get_one(s) for s in self._sources]
-        results = await asyncio.gather(*tasks)
-        metas = [r for r in results if r is not None]
-        return self._dedup_and_sort(metas)
 
     async def close(self):
         """Close all registered sources."""

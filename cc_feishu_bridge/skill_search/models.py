@@ -18,5 +18,5 @@ class SkillMeta:
     extra: dict = field(default_factory=dict)  # source-specific data
 
     def __post_init__(self):
-        if self.trust_level not in ("high", "medium", "low"):
+        if self.trust_level not in ("high", "medium", "community"):
             self.trust_level = "medium"
