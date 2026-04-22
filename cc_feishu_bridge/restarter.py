@@ -341,7 +341,7 @@ def check_supercc() -> tuple[bool, str]:
     import httpx
     try:
         response = httpx.get(
-            "https://pypi.org/pypi/supercc/json",
+            "https://pypi.org/pypi/pysupercc/json",
             timeout=15,
         )
         if response.status_code == 200:

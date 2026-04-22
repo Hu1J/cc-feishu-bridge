@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-04-22
+
+### Fixed
+
+- **SuperCC PyPI 包名修正**：`check_supercc()` 从检查 `supercc` 改为检查 `pysupercc`，确保迁移检测流程正常工作（supercc 包名与 PyPI 已有项目冲突，已更名）。
+
 ## [0.6.5] - 2026-04-22
 
 ### Added
